@@ -30,6 +30,7 @@ export interface TimelineImageRenderOutput {
   readonly height: number;
   readonly trackBoxes: readonly TimelineImageTrackBox[];
   readonly timedOutTracks: readonly string[];
+  readonly perf?: {loadMs: number; drawMs: number};
 }
 
 export type TimelineImageRenderFn = (
@@ -52,8 +53,11 @@ export class TimelineImageManagerImpl implements TimelineImageManager {
           '(timeline plugin absent?)',
       );
     }
+    const startMs = performance.now();
     const output = await this.renderer(opts);
+    const encodeStart = performance.now();
     const blob = await canvasToBlob(output.canvas, opts.format ?? 'image/png');
+    const encodeMs = performance.now() - encodeStart;
     const warnings: TimelineImageWarning[] = [];
     if (output.timedOutTracks.length > 0) {
       warnings.push('TIMEOUT');
@@ -64,6 +68,12 @@ export class TimelineImageManagerImpl implements TimelineImageManager {
       height: output.height,
       trackBoxes: output.trackBoxes,
       warnings,
+      perf: {
+        loadMs: output.perf?.loadMs ?? 0,
+        drawMs: output.perf?.drawMs ?? 0,
+        encodeMs,
+        elapsedMs: performance.now() - startMs,
+      },
     };
   }
 }

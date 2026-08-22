@@ -749,7 +749,7 @@ trace.pftrace
 | T1.9 | Playwright 全链路 + 基线 + 功能断言 | A1–C1 通过（本地真实 fixture）；**上游 PR 内用合成 trace 等价场景**；基线入库（合成 trace 基线） | T1.6, T1.7 | ✅ | commit pr1-timeline-image + ui/src/test/timeline_image.test.ts | 5/5 过（A2 pin 排序/堆叠布局、非纯色、**字节级确定性**、A1 边界左缘内容、A3 宽窗），repeat 稳定。**途中实战复现并修复 §3.3.3 阶段B 竞争**：UI rAF 逐出 memo → 新增 Raf.freezeCanvasRedraws 公共 API + 关键区冻结 + 帧稳定探针（run.json 留痕三要素）；C1 组件矩阵待 include 开关入 public API 后补 |
 | T1.10 | WebGL 读回专项（colorSpace 一致性 + 大图 toBlob） | 两条读回路径输出一致 | T1.6 | ⬜ | 测试 | §9 风险 4 |
 | T1.11 | locale 确定性验证（时间轴 label 格式化路径） | 确认/强制 root locale，跨机 diff 稳定 | T1.9 | ✅ | 源码核查记录 | 结论：**当前离屏输出（网格线，无刻度 label）locale 无关、确定性成立**；Timecode 核心是纯 toString/padStart。两处 `toLocaleString()` 隐患已定位并挂账：`time.ts` duration 格式化、`time_axis_panel.ts:90/165`（时间轴 label）——**includeTimeAxis 落地时（C1 组件矩阵）必须在该路径强制固定 locale**（en-US 或 raw string），已写入 D7 对策备注 |
-| T1.12 | metatrace 埋点接入（traceEventBegin/End，事件名按 §6.5 约定） | 导出的 metatrace 含 warmUp/barrier/draw/encode 分段时间线，与 result.perf 交叉验证一致 | T1.6, T1.7 | ⬜ | commit | §6.5；traceEvent API 首个消费者 |
+| T1.12 | metatrace 埋点接入（traceEventBegin/End，事件名按 §6.5 约定） | 导出的 metatrace 含 warmUp/barrier/draw/encode 分段时间线，与 result.perf 交叉验证一致 | T1.6, T1.7 | ✅ | commit pr1-timeline-image | §6.5；traceEvent API 首个消费者：事件 TimelineImage.warmUp/draw/e2e（round 入 args）；`TimelineImageResult.perf` 四段（load/draw/encode/elapsed）入 public API 并有 spec 断言；barrier 并入 warmUp 轮次计时 |
 
 #### D.2.3 M2 = PR 2：postMessage 入口
 

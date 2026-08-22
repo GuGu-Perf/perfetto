@@ -119,6 +119,7 @@ test.describe.serial('timeline image rendering', () => {
         trackUris: r.trackBoxes.map((t) => t.uri),
         tops: r.trackBoxes.map((t) => t.top),
         heights: r.trackBoxes.map((t) => t.height),
+        perf: r.perf,
       };
     }, A2_WINDOW);
 
@@ -140,6 +141,12 @@ test.describe.serial('timeline image rendering', () => {
     for (const h of result.heights) {
       expect(h).toBeGreaterThan(0);
     }
+    // Dual-trail observability (plan §6.5): phase timings are populated and
+    // internally consistent.
+    expect(result.perf.elapsedMs).toBeGreaterThan(0);
+    expect(result.perf.loadMs).toBeGreaterThanOrEqual(0);
+    expect(result.perf.drawMs).toBeGreaterThanOrEqual(0);
+    expect(result.perf.encodeMs).toBeGreaterThan(0);
   });
 
   test('A2: image is non-solid (WebGL layer composited)', async () => {

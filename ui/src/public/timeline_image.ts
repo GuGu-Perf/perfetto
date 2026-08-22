@@ -75,6 +75,13 @@ export interface TimelineImageResult {
   readonly height: number;
   readonly trackBoxes: readonly TimelineImageTrackBox[];
   readonly warnings: readonly TimelineImageWarning[];
+  /** Phase timings in milliseconds (see plan §6.5 dual-trail observability). */
+  readonly perf: {
+    readonly loadMs: number;
+    readonly drawMs: number;
+    readonly encodeMs: number;
+    readonly elapsedMs: number;
+  };
 }
 
 /**

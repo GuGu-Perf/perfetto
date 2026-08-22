@@ -45,6 +45,7 @@ import {Canvas2DRenderer} from '../../base/canvas2d_renderer';
 import {WebGLRenderer} from '../../base/gl/webgl_renderer';
 import type {Renderer} from '../../base/renderer';
 import {COLOR_BACKGROUND} from '../../frontend/css_constants';
+import {traceEvent} from '../../core/metatracing';
 import {TrackView} from './track_view';
 import {
   getDefaultCanvasColors,
@@ -95,6 +96,8 @@ export interface OffscreenTimelineRenderOutput {
   readonly timedOutTracks: readonly string[];
   // Number of fixed-point rounds actually executed.
   readonly rounds: number;
+  // Phase timings (ms), mirroring the metatrace event names (plan §6.5).
+  readonly perf: {loadMs: number; drawMs: number};
 }
 
 export async function renderOffscreenTimeline(
@@ -253,10 +256,20 @@ export async function renderOffscreenTimeline(
   trace.raf.freezeCanvasRedraws();
   let rounds = 0;
   let lastHash: string | undefined;
+  let loadMs = 0;
+  let drawMs = 0;
   try {
     for (;;) {
-      await warmUp();
-      draw();
+      const loadStart = performance.now();
+      await traceEvent('TimelineImage.warmUp', () => warmUp(), {
+        args: {round: String(rounds)},
+      });
+      loadMs += performance.now() - loadStart;
+      const drawStart = performance.now();
+      traceEvent('TimelineImage.draw', () => draw(), {
+        args: {round: String(rounds)},
+      });
+      drawMs += performance.now() - drawStart;
       rounds++;
       const hash = probeHash();
       if (hash === lastHash || rounds >= maxRounds) break;
@@ -341,6 +354,7 @@ export async function renderOffscreenTimeline(
   }
 
   // -------------------------------------------------------------- composite
+  traceEvent('TimelineImage.e2e', () => {}, {args: {rounds: String(rounds)}});
   const outCanvas = createCanvas(cssWidth, cssHeight, devicePixelRatio);
   const outCtx = ensure2d(outCanvas);
   outCtx.fillStyle = COLOR_BACKGROUND;
@@ -364,6 +378,7 @@ export async function renderOffscreenTimeline(
     trackBoxes,
     timedOutTracks,
     rounds,
+    perf: {loadMs, drawMs},
   };
 }
 
