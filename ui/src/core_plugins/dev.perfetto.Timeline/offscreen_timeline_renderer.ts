@@ -41,7 +41,9 @@ import type {duration} from '../../base/time';
 import type {TrackRenderContext} from '../../public/track';
 import {TrackNode} from '../../public/workspace';
 import type {TraceImpl} from '../../core/trace_impl';
+import {Canvas2DRenderer} from '../../base/canvas2d_renderer';
 import {WebGLRenderer} from '../../base/gl/webgl_renderer';
+import type {Renderer} from '../../base/renderer';
 import {COLOR_BACKGROUND} from '../../frontend/css_constants';
 import {TrackView} from './track_view';
 import {
@@ -174,24 +176,15 @@ export async function renderOffscreenTimeline(
   // ------------------------------------------------------------ canvases
   // Layer model mirrors the interactive timeline: a WebGL canvas below and a
   // Canvas 2D canvas above; here both are composited onto one opaque canvas.
-  const d2Canvas = createCanvas(cssWidth, cssHeight, devicePixelRatio);
-  const d2Ctx = ensure2d(d2Canvas);
-
-  const glCanvas = createCanvas(cssWidth, cssHeight, devicePixelRatio);
-  const glCtx = glCanvas.getContext('webgl2', {
-    alpha: true,
-    // Keep the drawing buffer readable for the composite below; the
-    // interactive timeline doesn't need this as the browser composites it.
-    preserveDrawingBuffer: true,
-    premultipliedAlpha: true,
-    antialias: true,
-  });
-  const renderer = glCtx
-    ? new WebGLRenderer(d2Ctx, glCtx)
-    : // WebGL unavailable: Canvas2DRenderer draws everything on the 2D layer.
-      new (await import('../../base/canvas2d_renderer')).Canvas2DRenderer(
-        d2Ctx,
-      );
+  // The surfaces (and the WebGL context) are shared across renders: browsers
+  // cap live GL contexts per page (~16), so creating one per render would
+  // exhaust them quickly. The context is recreated periodically to avoid
+  // unbounded state accumulation (see MAX_RENDERS_PER_CONTEXT).
+  const {d2Canvas, d2Ctx, glCanvas, glCtx, renderer} = acquireSharedSurfaces(
+    cssWidth,
+    cssHeight,
+    devicePixelRatio,
+  );
 
   const colors = getDefaultCanvasColors();
   const timelineRect = new Rect2D({
@@ -332,6 +325,105 @@ function findNodeByUri(node: TrackNode, uri: string): TrackNode | undefined {
     if (found) return found;
   }
   return undefined;
+}
+
+interface SharedSurfaces {
+  readonly d2Canvas: HTMLCanvasElement;
+  readonly d2Ctx: CanvasRenderingContext2D;
+  readonly glCanvas: HTMLCanvasElement;
+  readonly glCtx: WebGL2RenderingContext;
+  readonly renderer: WebGLRenderer;
+  renders: number;
+}
+
+// Recreate the shared WebGL context after this many renders to avoid state
+// accumulation in long-lived rendering processes.
+const MAX_RENDERS_PER_CONTEXT = 200;
+
+let sharedSurfaces: SharedSurfaces | undefined;
+let contextsCreated = 0;
+
+export function getOffscreenSurfaceStats(): {
+  renders: number;
+  contextsCreated: number;
+} {
+  return {renders: sharedSurfaces?.renders ?? 0, contextsCreated};
+}
+
+function acquireSharedSurfaces(
+  cssWidth: number,
+  cssHeight: number,
+  dpr: number,
+):
+  | SharedSurfaces
+  | {
+      d2Canvas: HTMLCanvasElement;
+      d2Ctx: CanvasRenderingContext2D;
+      glCanvas?: undefined;
+      glCtx?: undefined;
+      renderer: Renderer;
+    } {
+  if (sharedSurfaces && sharedSurfaces.renders >= MAX_RENDERS_PER_CONTEXT) {
+    disposeSharedSurfaces();
+  }
+  if (!sharedSurfaces) {
+    const d2Canvas = document.createElement('canvas');
+    const d2Ctx = ensure2d(d2Canvas);
+    const glCanvas = document.createElement('canvas');
+    const glCtx = glCanvas.getContext('webgl2', {
+      alpha: true,
+      // Keep the drawing buffer readable for the composite below; the
+      // interactive timeline doesn't need this as the browser composites it.
+      preserveDrawingBuffer: true,
+      premultipliedAlpha: true,
+      antialias: true,
+    });
+    if (!glCtx) {
+      // WebGL unavailable: Canvas2DRenderer draws everything on the 2D layer.
+      // No singleton needed in this mode.
+      const canvas = resizeCanvas(d2Canvas, cssWidth, cssHeight, dpr);
+      return {
+        d2Canvas: canvas,
+        d2Ctx,
+        renderer: new Canvas2DRenderer(d2Ctx),
+      };
+    }
+    sharedSurfaces = {
+      d2Canvas,
+      d2Ctx,
+      glCanvas,
+      glCtx,
+      renderer: new WebGLRenderer(d2Ctx, glCtx),
+      renders: 0,
+    };
+    contextsCreated++;
+  }
+  sharedSurfaces.renders++;
+  resizeCanvas(sharedSurfaces.d2Canvas, cssWidth, cssHeight, dpr);
+  resizeCanvas(sharedSurfaces.glCanvas, cssWidth, cssHeight, dpr);
+  return sharedSurfaces;
+}
+
+function disposeSharedSurfaces(): void {
+  if (!sharedSurfaces) return;
+  try {
+    sharedSurfaces.glCtx.getExtension('WEBGL_lose_context')?.loseContext();
+  } finally {
+    sharedSurfaces = undefined;
+  }
+}
+
+function resizeCanvas(
+  canvas: HTMLCanvasElement,
+  cssWidth: number,
+  cssHeight: number,
+  dpr: number,
+): HTMLCanvasElement {
+  canvas.width = Math.ceil(cssWidth * dpr);
+  canvas.height = Math.ceil(cssHeight * dpr);
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  return canvas;
 }
 
 function createCanvas(

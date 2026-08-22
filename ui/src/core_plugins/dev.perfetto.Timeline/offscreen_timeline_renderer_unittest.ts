@@ -14,6 +14,7 @@
 
 import {createFakeTraceImpl} from '../../core/fake_trace_impl';
 import {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
+import {Time} from '../../base/time';
 import {renderOffscreenTimeline} from './offscreen_timeline_renderer';
 
 // jsdom has no canvas implementation, so full rendering cannot run here;
@@ -84,5 +85,8 @@ test('registered track resolves from the workspace by uri', async () => {
 });
 
 function span(start: bigint, end: bigint): HighPrecisionTimeSpan {
-  return HighPrecisionTimeSpan.fromTime(start, end);
+  return HighPrecisionTimeSpan.fromTime(
+    Time.fromRaw(start),
+    Time.fromRaw(end),
+  );
 }
