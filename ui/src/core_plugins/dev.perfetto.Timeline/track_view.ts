@@ -31,6 +31,7 @@ import {
   type VerticalBounds,
 } from '../../base/geom';
 import type {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
+import type {duration} from '../../base/time';
 import {Icons} from '../../base/semantic_icons';
 import {TimeScale} from '../../base/time_scale';
 import type {RequiredField} from '../../base/utils';
@@ -298,6 +299,10 @@ export class TrackView {
     trackPerfStats: WeakMap<TrackNode, PerfStats>,
     colors: CanvasColors,
     renderer: Renderer,
+    // Optional resolution override. When set, it is passed to the track
+    // renderer instead of the value derived from the rect width (e.g. to
+    // fetch data at a lower resolution than the canvas is drawn at).
+    resolutionOverride?: duration,
   ) {
     // For each track we rendered in view(), render it to the canvas. We know the
     // vertical bounds, so we just need to combine it with the horizontal bounds
@@ -332,10 +337,10 @@ export class TrackView {
       right: trackRect.width,
     });
 
-    const maybeNewResolution = calculateResolution(
-      visibleWindow,
-      trackRect.width,
-    );
+    const maybeNewResolution =
+      resolutionOverride !== undefined
+        ? {ok: true as const, value: resolutionOverride}
+        : calculateResolution(visibleWindow, trackRect.width);
     if (!maybeNewResolution.ok) {
       return;
     }

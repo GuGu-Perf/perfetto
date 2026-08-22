@@ -27,7 +27,7 @@
 import {hex} from 'color-convert';
 import {type Rect2D, type Size2D, Transform1D} from '../../base/geom';
 import type {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
-import type {time} from '../../base/time';
+import type {duration, time} from '../../base/time';
 import type {TimeScale} from '../../base/time_scale';
 import type {Renderer} from '../../base/renderer';
 import {drawVerticalLineAtTime} from '../../base/vertical_line_helper';
@@ -35,7 +35,14 @@ import type {TraceImpl} from '../../core/trace_impl';
 import type {PerfStats} from '../../core/perf_stats';
 import {
   COLOR_ACCENT,
+  COLOR_BACKGROUND,
+  COLOR_BACKGROUND_SECONDARY,
+  COLOR_BORDER,
   COLOR_BORDER_SECONDARY,
+  COLOR_NEUTRAL,
+  COLOR_TEXT,
+  COLOR_TEXT_MUTED,
+  COLOR_TIMELINE_OVERLAY,
 } from '../../frontend/css_constants';
 import type {CanvasColors} from '../../public/canvas_colors';
 import type {Note, SpanNote} from '../../public/note';
@@ -79,6 +86,13 @@ export interface TimelineCanvasRenderArgs {
   readonly areaDrag?: InProgressAreaSelection;
   readonly handleDrag?: InProgressHandleDrag;
   readonly currentSnapPoint?: SnapPoint;
+  // Draw the grid lines. Default: true.
+  readonly includeGrid?: boolean;
+  // Draw session-bound overlays: flows, hovered note/cursor verticals, note
+  // verticals, area selection and registered track overlays. Offscreen
+  // consumers producing deterministic output set this to false.
+  // Default: true.
+  readonly includeSessionOverlays?: boolean;
 }
 
 export interface TimelineCanvasRenderResult {
@@ -244,6 +258,7 @@ export function drawTracksOnCanvas(
   renderer: Renderer,
   perfStatsEnabled: boolean,
   trackPerfStats: WeakMap<TrackNode, PerfStats>,
+  resolutionOverride?: duration,
 ): number {
   let tracksOnCanvas = 0;
   for (const trackView of renderedTracks) {
@@ -263,6 +278,7 @@ export function drawTracksOnCanvas(
         trackPerfStats,
         colors,
         renderer,
+        resolutionOverride,
       );
       ++tracksOnCanvas;
     }
@@ -470,4 +486,22 @@ function cssColorToRgba(cssColor: string): number {
 
   cssColorCache.set(cssColor, packed);
   return packed;
+}
+
+/**
+ * The standard timeline canvas color set, shared by the interactive timeline
+ * and offscreen consumers so both render with identical colors.
+ */
+export function getDefaultCanvasColors(): CanvasColors {
+  return {
+    COLOR_BORDER,
+    COLOR_BORDER_SECONDARY,
+    COLOR_BACKGROUND_SECONDARY,
+    COLOR_ACCENT,
+    COLOR_BACKGROUND,
+    COLOR_NEUTRAL,
+    COLOR_TEXT,
+    COLOR_TEXT_MUTED,
+    COLOR_TIMELINE_OVERLAY,
+  };
 }

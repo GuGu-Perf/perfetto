@@ -46,30 +46,21 @@ import type {TraceImpl} from '../../core/trace_impl';
 import type {TrackNode} from '../../public/workspace';
 import type {SnapPoint} from '../../public/track';
 import {VirtualOverlayCanvas} from '../../widgets/virtual_overlay_canvas';
-import {
-  COLOR_ACCENT,
-  COLOR_BACKGROUND,
-  COLOR_BACKGROUND_SECONDARY,
-  COLOR_BORDER,
-  COLOR_BORDER_SECONDARY,
-  COLOR_NEUTRAL,
-  COLOR_TEXT,
-  COLOR_TEXT_MUTED,
-  COLOR_TIMELINE_OVERLAY,
-  TRACK_SHELL_WIDTH,
-} from '../../frontend/css_constants';
+import {TRACK_SHELL_WIDTH} from '../../frontend/css_constants';
 import {
   shiftDragPanInteraction,
   wheelNavigationInteraction,
 } from './timeline_interactions';
 import {TrackView} from './track_view';
-import {renderTimelineCanvas} from './timeline_canvas_renderer';
+import {
+  getDefaultCanvasColors,
+  renderTimelineCanvas,
+} from './timeline_canvas_renderer';
 import {featureFlags} from '../../core/feature_flags';
 import {EmptyState} from '../../widgets/empty_state';
 import {Button, ButtonVariant} from '../../widgets/button';
 import {Intent} from '../../widgets/common';
 import {CursorTooltip} from '../../widgets/cursor_tooltip';
-import type {CanvasColors} from '../../public/canvas_colors';
 import {Icons} from '../../base/semantic_icons';
 import type {Renderer} from '../../base/renderer';
 
@@ -417,17 +408,7 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     const visibleWindow = this.trace.timeline.visibleWindow;
     const timescale = new TimeScale(visibleWindow, timelineRect);
 
-    const colors: CanvasColors = {
-      COLOR_BORDER,
-      COLOR_BORDER_SECONDARY,
-      COLOR_BACKGROUND_SECONDARY,
-      COLOR_ACCENT,
-      COLOR_BACKGROUND,
-      COLOR_NEUTRAL,
-      COLOR_TEXT,
-      COLOR_TEXT_MUTED,
-      COLOR_TIMELINE_OVERLAY,
-    };
+    const colors = getDefaultCanvasColors();
 
     const start = performance.now();
 
