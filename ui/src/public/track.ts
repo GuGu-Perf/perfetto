@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import type m from 'mithril';
-import type {duration, time} from '../base/time';
+import type {duration, time, TimeSpan} from '../base/time';
 import type {Size2D, VerticalBounds} from '../base/geom';
 import type {TimeScale} from '../base/time_scale';
 import type {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
@@ -133,6 +133,18 @@ export interface TrackRenderContext extends TrackContext {
    * Uses WebGL when available, with Canvas 2D fallback.
    */
   readonly renderer: Renderer;
+
+  /**
+   * Optional override for the time span used to fetch data.
+   *
+   * Defaults to undefined, meaning tracks fetch data for a padded window
+   * around `visibleWindow` (see BufferedBounds). Consumers which want to
+   * control the query window exactly (e.g. an offscreen renderer with no
+   * interest in pan/zoom prefetching) may set this; tracks which support it
+   * should use it in place of their derived query bounds. Purely a
+   * performance hint: rendering correctness must not depend on it.
+   */
+  readonly queryBounds?: TimeSpan;
 }
 
 // A definition of a track, including a renderer implementation and metadata.
@@ -245,6 +257,18 @@ export interface TrackRenderer {
    * Canvas 2D content.
    */
   render(ctx: TrackRenderContext): void;
+
+  /**
+   * Optional: Wait until the data needed to render `renderCtx` is available.
+   *
+   * Implementations should trigger their normal data loading for the given
+   * context and resolve once it has settled (loaded, failed or superseded).
+   * The promise must never reject; failures surface through the normal
+   * render() path. Tracks which don't implement this are treated as
+   * "immediately ready": consumers which need guaranteed complete output
+   * (e.g. offscreen image rendering) fall back to polling with a warning.
+   */
+  whenDataReady?(renderCtx: TrackRenderContext): Promise<void>;
 
   /**
    * Return the vertical bounds (top & bottom) of a slice were it to be rendered
