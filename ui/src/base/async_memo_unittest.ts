@@ -423,3 +423,72 @@ test('QUERY_CANCELLED result is not cached', async () => {
   // Query should be called again since nothing was cached
   expect(queryFn).toHaveBeenCalledTimes(2);
 });
+
+test('waitFor resolves when the task for the key completes', async () => {
+  const slot = new AsyncMemo<number>();
+  const queryFn = vi.fn().mockImplementation(async () => {
+    await flushPromises();
+    return 42;
+  });
+
+  const wait = slot.waitFor({key: {id: 1}, compute: queryFn});
+  // While pending, use() reports pending with no data.
+  expect(slot.use({key: {id: 1}, compute: queryFn}).isPending).toBe(true);
+
+  await wait;
+
+  const result = slot.use({key: {id: 1}, compute: queryFn});
+  expect(result.data).toBe(42);
+  expect(result.isPending).toBe(false);
+});
+
+test('waitFor resolves immediately when data is already cached', async () => {
+  const slot = new AsyncMemo<number>();
+  const queryFn = vi.fn().mockResolvedValue(7);
+
+  slot.use({key: {id: 1}, compute: queryFn});
+  await flushPromises();
+
+  await slot.waitFor({key: {id: 1}, compute: queryFn});
+  expect(queryFn).toHaveBeenCalledTimes(1);
+});
+
+test('waitFor settles on the latest task when the key is replaced', async () => {
+  const slot = new AsyncMemo<number>();
+  let resolveFirst: (value: number) => void = () => {};
+  const firstQuery = vi
+    .fn()
+    .mockImplementation(
+      () => new Promise<number>((resolve) => (resolveFirst = resolve)),
+    );
+  const secondQuery = vi.fn().mockResolvedValue(2);
+
+  const wait = slot.waitFor({key: {id: 1}, compute: firstQuery});
+  // Replace the pending task with a newer key while the first runs.
+  slot.use({key: {id: 2}, compute: secondQuery});
+  await flushPromises();
+  resolveFirst(1);
+  await wait;
+
+  // The memo settles on the latest key; the stale first result is not cached.
+  expect(slot.use({key: {id: 2}, compute: secondQuery}).data).toBe(2);
+});
+
+test('waitFor returns without spinning on falsy enabled', async () => {
+  const slot = new AsyncMemo<number>();
+  const queryFn = vi.fn().mockResolvedValue(1);
+
+  await slot.waitFor({key: {id: 1}, compute: queryFn, enabled: false});
+  expect(queryFn).not.toHaveBeenCalled();
+});
+
+test('waitFor resolves when a pending task is cancelled by invalidate', async () => {
+  const slot = new AsyncMemo<number>();
+  const queryFn = vi.fn().mockImplementation(
+    () => new Promise<number>(() => {}), // Never settles on its own.
+  );
+
+  const wait = slot.waitFor({key: {id: 1}, compute: queryFn});
+  slot.invalidate();
+  await wait; // Must not hang.
+});

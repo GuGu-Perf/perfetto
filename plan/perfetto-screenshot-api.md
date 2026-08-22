@@ -739,7 +739,7 @@ trace.pftrace
 | ID | 任务 | 验收标准 | 依赖 | 状态 | 产出物 | 备注 |
 |---|---|---|---|---|---|---|
 | T1.0 | UI 测试环境搭建（node_modules、`ui/run-integrationtests`） | 本地跑通任一官方既有 Playwright 用例（环境可信基线）；确认 fork 侧 CI（GitHub Actions）可跑 UI 集成测试 | — | 🔵 | 环境记录 | §6.4 CI 看护载体；2026-08-23 依赖经代理装毕；官方用例验证与 fork CI 确认待做（未达验收不得标 ✅） |
-| T1.2 | AsyncMemo 暴露 pending 完成 Promise | whenDataReady 可基于其实现；既有 use() 行为零变化 | — | ⬜ | commit | §3.3.1 事实 3 |
+| T1.2 | AsyncMemo 暴露 pending 完成 Promise | whenDataReady 可基于其实现；既有 use() 行为零变化 | — | ✅ | commit pr1-timeline-image | §3.3.1 事实 3；新增 AsyncMemo.waitFor()（单次调度 + settle 信号循环，key 被替换/invalidate/dispose 均正确解除等待），单测 18/18 过（新增 5 例） |
 | T1.3 | 接口增量：`queryBounds` + `whenDataReady?` | 可选成员、缺省行为不变；插件文档同步 | — | ⬜ | commit | 开发验证期按方案默认实现（原依赖 T0.2 已暂缓）；上游对齐恢复时复核，若届时选白名单则改❌记 ADR |
 | T1.4 | slice/counter track 采用 whenDataReady + queryBounds | 离屏数据就绪可等待；查询量 1x | T1.3 | ⬜ | commit | |
 | T1.5 | offscreen_timeline_renderer 两段式（warm-up → barrier → render + 定点迭代） | A2 窗口全链路出图、无棋盘格 | T0.3, T1.2–T1.4 | ⬜ | commit | §3.3.3 |

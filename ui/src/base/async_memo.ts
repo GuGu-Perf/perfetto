@@ -188,6 +188,9 @@ export class AsyncMemo<T> {
   private currentSignal?: {cancelled: boolean};
   // Stores error keyed by keyStr - thrown on next use() with same key
   private error?: {keyStr: string; error: Error};
+  // Resolved when the currently pending task settles, regardless of outcome.
+  private pendingSettled?: Promise<void>;
+  private resolvePendingSettled?: () => void;
 
   constructor(
     private readonly queue: AtomicTaskQueue = new AtomicTaskQueue(),
@@ -255,6 +258,7 @@ export class AsyncMemo<T> {
             this.finaliseError(key, e);
           }
         } finally {
+          this.settlePending();
           m.redraw();
         }
       });
@@ -290,6 +294,48 @@ export class AsyncMemo<T> {
 
     // Can't use stale data
     return {data: undefined, isPending: true};
+  }
+
+  /**
+   * Wait until the memo settles for `options.key`.
+   *
+   * Schedules the task via the normal `use()` path exactly once, then awaits
+   * until either the requested key's result is available or the memo has no
+   * pending task at all (which also covers the requested key being replaced
+   * by a newer one, cancellation via invalidate() and dispose()). Callers
+   * that need the data should follow up with `use()`; rejected `compute()`
+   * errors surface there, not from this method.
+   *
+   * Returns immediately (without spinning or scheduling) when pending solely
+   * because of a falsy `enabled` dependency: callers composing multiple
+   * memos are expected to await the dependency first.
+   *
+   * @throws Error if called after dispose()
+   */
+  async waitFor<K extends JSONCompatible<K>>(
+    options: AsyncMemoOptions<T, K>,
+  ): Promise<void> {
+    const result = this.use(options);
+    if (!result.isPending) return;
+    while (this.pendingKey !== undefined) {
+      await this.waitForPendingToSettle();
+    }
+  }
+
+  private waitForPendingToSettle(): Promise<void> {
+    if (this.pendingSettled === undefined) {
+      this.pendingSettled = new Promise<void>((resolve) => {
+        this.resolvePendingSettled = resolve;
+      });
+    }
+    return this.pendingSettled;
+  }
+
+  private settlePending(): void {
+    this.pendingSettled = undefined;
+    const resolve = this.resolvePendingSettled;
+    this.resolvePendingSettled = undefined;
+    resolve?.();
   }
 
   /**
@@ -360,6 +406,7 @@ export class AsyncMemo<T> {
     }
     this.pendingKey = undefined;
     this.error = undefined;
+    this.settlePending();
 
     // Schedule cache disposal/clearing through the queue so it runs after any
     // in-flight task settles.
@@ -380,6 +427,7 @@ export class AsyncMemo<T> {
 
     this.queue.cancel(this);
     this.pendingKey = undefined;
+    this.settlePending();
 
     // Schedule cache disposal through the queue. This runs after any
     // in-flight task completes, ensuring we dispose whatever ends up
