@@ -27,6 +27,7 @@ import type {DisposableStack} from '../base/disposable_stack';
 import type {Evt} from '../base/events';
 import type {StatusbarManager} from './statusbar';
 import type {MinimapManager} from './minimap';
+import type {TimelineImageManager} from './timeline_image';
 import type {SearchManager} from './search';
 import type {InitialPageManager} from './initial_page';
 
@@ -57,6 +58,8 @@ export interface Trace extends App {
   readonly traceInfo: TraceInfo;
   readonly statusbar: StatusbarManager;
   readonly minimap: MinimapManager;
+
+  readonly timelineImage: TimelineImageManager;
   readonly search: SearchManager;
   readonly initialPage: InitialPageManager;
 
