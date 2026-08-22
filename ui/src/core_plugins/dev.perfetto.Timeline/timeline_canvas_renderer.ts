@@ -82,6 +82,9 @@ export interface TimelineCanvasRenderArgs {
   // Per-track perf stats passthrough for TrackView#drawCanvas.
   readonly perfStatsEnabled: boolean;
   readonly trackPerfStats: WeakMap<TrackNode, PerfStats>;
+  // Optional resolution override handed to TrackView#drawCanvas so the draw
+  // phase fetches at the same resolution the warm-up phase used.
+  readonly resolutionOverride?: duration;
   // In-progress drag overlays. Only set by the interactive component.
   readonly areaDrag?: InProgressAreaSelection;
   readonly handleDrag?: InProgressHandleDrag;
@@ -139,6 +142,7 @@ export function renderTimelineCanvas(
     renderer,
     args.perfStatsEnabled,
     args.trackPerfStats,
+    args.resolutionOverride,
   );
 
   renderFlows(

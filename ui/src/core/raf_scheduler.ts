@@ -157,6 +157,25 @@ export class RafScheduler implements Raf {
     }
   }
 
+  // Canvas redraw freeze, used by the offscreen timeline renderer: while
+  // frozen, canvas redraw callbacks are deferred (not dropped) so an
+  // in-flight offscreen render cannot race the interactive timeline's track
+  // data loads (single-entry AsyncMemo eviction). DOM redraws are unaffected.
+  private canvasRedrawsFrozen = 0;
+  private canvasRedrawPending = false;
+
+  freezeCanvasRedraws(): void {
+    this.canvasRedrawsFrozen++;
+  }
+
+  thawCanvasRedraws(): void {
+    this.canvasRedrawsFrozen = Math.max(0, this.canvasRedrawsFrozen - 1);
+    if (this.canvasRedrawsFrozen === 0 && this.canvasRedrawPending) {
+      this.canvasRedrawPending = false;
+      this.syncCanvasRedraw();
+    }
+  }
+
   private maybeScheduleAnimationFrame(force = false) {
     if (this.hasScheduledNextFrame) return;
     if (this.animationCallbacks.size !== 0 || force) {
@@ -176,7 +195,11 @@ export class RafScheduler implements Raf {
     const tAnim = performance.now();
     doFullRedraw && this.syncDomRedraw();
     const tDom = performance.now();
-    this.syncCanvasRedraw();
+    if (this.canvasRedrawsFrozen > 0) {
+      this.canvasRedrawPending = true;
+    } else {
+      this.syncCanvasRedraw();
+    }
     const tCanvas = performance.now();
 
     const animTime = tAnim - tStart;

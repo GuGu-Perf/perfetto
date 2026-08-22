@@ -241,14 +241,71 @@ export async function renderOffscreenTimeline(
     return allSettledInstantly;
   };
 
-  // Warm-up/draw fixed point: drawing can trigger data-dependent second-order
-  // queries; re-warm (bounded) until everything settles instantly.
+  // Warm-up/draw fixed point. Two termination hazards are handled by
+  // demanding a STABLE frame: (a) drawing can trigger data-dependent
+  // second-order queries; (b) the interactive timeline's rAF redraws can
+  // evict our memo entries across an await boundary, leaving a drawn frame
+  // based on stale/loading data (plan §3.3.3 phase B). A frame is considered
+  // final only when a redraw produces a pixel-identical probe hash.
+  // Freeze interactive canvas redraws for the whole warm-up/draw/composite
+  // critical section: a live UI redraw between our await points evicts the
+  // single-entry track memos and corrupts the frame (plan §3.3.3 phase B).
+  trace.raf.freezeCanvasRedraws();
   let rounds = 0;
-  let allSettled = false;
-  while (rounds < maxRounds && !(allSettled && rounds > 0)) {
-    allSettled = await warmUp();
-    draw();
-    rounds++;
+  let lastHash: string | undefined;
+  try {
+    for (;;) {
+      await warmUp();
+      draw();
+      rounds++;
+      const hash = probeHash();
+      if (hash === lastHash || rounds >= maxRounds) break;
+      lastHash = hash;
+    }
+  } finally {
+    trace.raf.thawCanvasRedraws();
+  }
+
+  // Cheap stability probe: downscale both layers into a tiny canvas and
+  // hash the pixels. Two consecutive identical hashes mean no memo eviction
+  // or second-order query altered the output between rounds.
+  function probeHash(): string {
+    const probe = document.createElement('canvas');
+    probe.width = 32;
+    probe.height = 32;
+    const pctx = ensure2d(probe);
+    pctx.fillStyle = '#000';
+    pctx.fillRect(0, 0, 32, 32);
+    if (glCanvas) {
+      pctx.drawImage(
+        glCanvas,
+        0,
+        0,
+        glCanvas.width,
+        glCanvas.height,
+        0,
+        0,
+        32,
+        32,
+      );
+    }
+    pctx.drawImage(
+      d2Canvas,
+      0,
+      0,
+      d2Canvas.width,
+      d2Canvas.height,
+      0,
+      0,
+      32,
+      32,
+    );
+    const d = pctx.getImageData(0, 0, 32, 32).data;
+    let h = '';
+    for (let i = 0; i < d.length; i += 4) {
+      h += String.fromCharCode(d[i] & 0xff, d[i + 1] & 0xff, d[i + 2] & 0xff);
+    }
+    return h;
   }
 
   function draw() {
@@ -274,6 +331,7 @@ export async function renderOffscreenTimeline(
       tickOrigin: trace.timeline.getTimeAxisOrigin(),
       perfStatsEnabled: false,
       trackPerfStats: new WeakMap(),
+      resolutionOverride: resolution,
       includeGrid: true,
       includeSessionOverlays: false,
     });
@@ -287,10 +345,15 @@ export async function renderOffscreenTimeline(
   const outCtx = ensure2d(outCanvas);
   outCtx.fillStyle = COLOR_BACKGROUND;
   outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
-  if (glCtx) {
+  if (glCtx && glCanvas) {
     // WebGL layer below, Canvas 2D layer (text etc.) above, matching the
-    // interactive z-order.
-    outCtx.drawImage(glCanvas, 0, 0);
+    // interactive z-order. Composite via createImageBitmap rather than a
+    // direct drawImage: after a canvas resize the 2D drawImage path can
+    // serve a stale snapshot of the GL buffer (first readback only), while
+    // the bitmap path performs a fresh readback (plan T1.10 for root cause).
+    const glBitmap = await createImageBitmap(glCanvas);
+    outCtx.drawImage(glBitmap, 0, 0);
+    glBitmap.close();
   }
   outCtx.drawImage(d2Canvas, 0, 0);
 
@@ -334,6 +397,8 @@ interface SharedSurfaces {
   readonly glCtx: WebGL2RenderingContext;
   readonly renderer: WebGLRenderer;
   renders: number;
+  lastWidth: number;
+  lastHeight: number;
 }
 
 // Recreate the shared WebGL context after this many renders to avoid state
@@ -350,20 +415,31 @@ export function getOffscreenSurfaceStats(): {
   return {renders: sharedSurfaces?.renders ?? 0, contextsCreated};
 }
 
+export interface AcquiredSurfaces {
+  surfaces?: SharedSurfaces;
+  sizeChanged: boolean;
+  d2Canvas: HTMLCanvasElement;
+  d2Ctx: CanvasRenderingContext2D;
+  glCanvas?: HTMLCanvasElement;
+  glCtx?: WebGL2RenderingContext;
+  renderer: Renderer;
+}
+
 function acquireSharedSurfaces(
   cssWidth: number,
   cssHeight: number,
   dpr: number,
-):
-  | SharedSurfaces
-  | {
-      d2Canvas: HTMLCanvasElement;
-      d2Ctx: CanvasRenderingContext2D;
-      glCanvas?: undefined;
-      glCtx?: undefined;
-      renderer: Renderer;
-    } {
-  if (sharedSurfaces && sharedSurfaces.renders >= MAX_RENDERS_PER_CONTEXT) {
+): AcquiredSurfaces {
+  if (
+    sharedSurfaces &&
+    (sharedSurfaces.renders >= MAX_RENDERS_PER_CONTEXT ||
+      sharedSurfaces.lastWidth !== cssWidth ||
+      sharedSurfaces.lastHeight !== cssHeight)
+  ) {
+    // Recreate on size change as well: a resized WebGL canvas can serve a
+    // corrupted first frame from its back buffer (browser resize-transition
+    // behaviour, see plan T1.10); a fresh context sidesteps the entire
+    // class. Context churn is bounded by distinct sizes per session.
     disposeSharedSurfaces();
   }
   if (!sharedSurfaces) {
@@ -383,10 +459,11 @@ function acquireSharedSurfaces(
       // No singleton needed in this mode.
       const canvas = resizeCanvas(d2Canvas, cssWidth, cssHeight, dpr);
       return {
+        sizeChanged: true,
         d2Canvas: canvas,
         d2Ctx,
         renderer: new Canvas2DRenderer(d2Ctx),
-      };
+      } satisfies AcquiredSurfaces;
     }
     sharedSurfaces = {
       d2Canvas,
@@ -395,13 +472,28 @@ function acquireSharedSurfaces(
       glCtx,
       renderer: new WebGLRenderer(d2Ctx, glCtx),
       renders: 0,
+      lastWidth: 0,
+      lastHeight: 0,
     };
     contextsCreated++;
   }
   sharedSurfaces.renders++;
+  const sizeChanged =
+    sharedSurfaces.lastWidth !== cssWidth ||
+    sharedSurfaces.lastHeight !== cssHeight;
   resizeCanvas(sharedSurfaces.d2Canvas, cssWidth, cssHeight, dpr);
   resizeCanvas(sharedSurfaces.glCanvas, cssWidth, cssHeight, dpr);
-  return sharedSurfaces;
+  sharedSurfaces.lastWidth = cssWidth;
+  sharedSurfaces.lastHeight = cssHeight;
+  return {
+    surfaces: sharedSurfaces,
+    sizeChanged,
+    d2Canvas: sharedSurfaces.d2Canvas,
+    d2Ctx: sharedSurfaces.d2Ctx,
+    glCanvas: sharedSurfaces.glCanvas,
+    glCtx: sharedSurfaces.glCtx,
+    renderer: sharedSurfaces.renderer,
+  };
 }
 
 function disposeSharedSurfaces(): void {

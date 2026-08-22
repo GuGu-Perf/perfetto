@@ -33,4 +33,12 @@ export interface Raf {
    * @returns - A disposable object that removes the callback when disposed.
    */
   addCanvasRedrawCallback(cb: RedrawCallback): Disposable;
+  /**
+   * Temporarily defer canvas redraw callbacks (DOM redraws unaffected).
+   * Used by the offscreen timeline renderer to avoid racing the interactive
+   * timeline's track data loads. Callbacks are deferred, not dropped, and
+   * run once on the final thaw. Pairs must be balanced.
+   */
+  freezeCanvasRedraws(): void;
+  thawCanvasRedraws(): void;
 }
