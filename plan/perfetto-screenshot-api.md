@@ -335,7 +335,7 @@ iframe.contentWindow.postMessage({perfetto: {renderTimelineImage: {
 | D4 | **缓存键含 resolution，截图与视口宽度解耦** | `resolutionMode: 'exact' \| 'matchUi'` 显式策略（matchUi 不变式：timeSpan 恒定、只有输出宽度可变，见 §3.3.5）；性能承诺修正为"同参数重复截图必命中" |
 | D5 | **任意宽度下的组件自适应**：时间轴刻度密度、track shell 宽度占比 | 刻度算法参数化（接受任意 widthPx）；shell 宽度固定 `TRACK_SHELL_WIDTH` 常量（与 UI 一致，不随截图宽度缩放——保证与用户所见同构） |
 | D6 | **track uri 的可发现性** | (1) `RunQuery` / MCP query；(2) 便捷参数 `trackNamePatterns`（复用 `PinTracksByRegex` 匹配逻辑），PR 3。**正则来自外部消息：加长度/复杂度上限与匹配超时防护（ReDoS 面，虽仅信任 origin 可达）** |
-| D7 | **确定性渲染**（CI diff） | `includeSelection/includeNotes` 默认 false；`timestampFormat` 固定默认、不读用户设置；`document.fonts.ready` 预热；不依赖时钟/hover；**验证时间轴 label 是否经 `Intl`（locale 影响数字分组，跨机 diff 漂移）——若是，离屏路径强制 root locale** |
+| D7 | **确定性渲染**（CI diff） | `includeSelection/includeNotes` 默认 false；`timestampFormat` 固定默认、不读用户设置；`document.fonts.ready` 预热；不依赖时钟/hover；时间轴 label 核查结论：Timecode 纯字符串拼接 ✓；两处 `toLocaleString()` 隐患（`time.ts` duration、`time_axis_panel.ts:90/165`）——includeTimeAxis 落地时强制固定 locale（T1.11 已验证记录） |
 | D8 | **超大输出** | 画布尺寸联合求解上限 + 分片，见 §5.3 |
 | D9 | **jsdom 无 canvas** | 测试分层（§6.1）：纯逻辑 jsdom 单测；渲染路径只走 Playwright 集成测试（真实浏览器） |
 | D10 | **安全** | postMessage 响应只回发 source window；信任模型与部署约束统一见 §8.1 |
@@ -748,7 +748,7 @@ trace.pftrace
 | T1.8 | jsdom 单测（布局/预算/TimeScale/校验/warning） | 全绿；mock memo 覆盖超时软退出 | T1.7 | ✅ | commit pr1-timeline-image | 新增 offscreen_timeline_renderer_unittest（4 例，含抓出并修复 widthPx=0 被 Math.max 吞掉的真实边界漏洞）+ timeline_image_manager_unittest（3 例：TIMELINE_UNAVAILABLE/TIMEOUT 映射/编码失败）；全套 45/45 |
 | T1.9 | Playwright 全链路 + 基线 + 功能断言 | A1–C1 通过（本地真实 fixture）；**上游 PR 内用合成 trace 等价场景**；基线入库（合成 trace 基线） | T1.6, T1.7 | ✅ | commit pr1-timeline-image + ui/src/test/timeline_image.test.ts | 5/5 过（A2 pin 排序/堆叠布局、非纯色、**字节级确定性**、A1 边界左缘内容、A3 宽窗），repeat 稳定。**途中实战复现并修复 §3.3.3 阶段B 竞争**：UI rAF 逐出 memo → 新增 Raf.freezeCanvasRedraws 公共 API + 关键区冻结 + 帧稳定探针（run.json 留痕三要素）；C1 组件矩阵待 include 开关入 public API 后补 |
 | T1.10 | WebGL 读回专项（colorSpace 一致性 + 大图 toBlob） | 两条读回路径输出一致 | T1.6 | ⬜ | 测试 | §9 风险 4 |
-| T1.11 | locale 确定性验证（时间轴 label 格式化路径） | 确认/强制 root locale，跨机 diff 稳定 | T1.9 | ⬜ | 测试 | D7 |
+| T1.11 | locale 确定性验证（时间轴 label 格式化路径） | 确认/强制 root locale，跨机 diff 稳定 | T1.9 | ✅ | 源码核查记录 | 结论：**当前离屏输出（网格线，无刻度 label）locale 无关、确定性成立**；Timecode 核心是纯 toString/padStart。两处 `toLocaleString()` 隐患已定位并挂账：`time.ts` duration 格式化、`time_axis_panel.ts:90/165`（时间轴 label）——**includeTimeAxis 落地时（C1 组件矩阵）必须在该路径强制固定 locale**（en-US 或 raw string），已写入 D7 对策备注 |
 | T1.12 | metatrace 埋点接入（traceEventBegin/End，事件名按 §6.5 约定） | 导出的 metatrace 含 warmUp/barrier/draw/encode 分段时间线，与 result.perf 交叉验证一致 | T1.6, T1.7 | ⬜ | commit | §6.5；traceEvent API 首个消费者 |
 
 #### D.2.3 M2 = PR 2：postMessage 入口
