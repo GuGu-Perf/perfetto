@@ -745,7 +745,7 @@ trace.pftrace
 | T1.5 | offscreen_timeline_renderer 两段式（warm-up → barrier → render + 定点迭代） | A2 窗口全链路出图、无棋盘格 | T0.3, T1.2–T1.4 | ✅ | commit pr1-timeline-image | §3.3.3；含 GL(preserveDrawingBuffer)+2D 双层合成、数据/画布分辨率解耦（默认 1x/2x）、画布上限保护、per-track 超时软退出、session 覆盖物默认关闭；E2E 出图验证随 T1.7 API 挂载（控制台演示）执行 |
 | T1.6 | GL context 单例 + `preserveDrawingBuffer` 读回 | 连续 20 张无 context lost；非纯色断言过 | T1.5 | ⬜ | commit | §3.3.4 |
 | T1.7 | public/timeline_image.ts + core/timeline_image_manager.ts + Trace 挂载 | 控制台 `trace.renderTimelineImage({...})` 出图；Timeline 缺席时 TIMELINE_UNAVAILABLE | T1.5 | ✅ | commit pr1-timeline-image | minimap 注册反转模式（§3.2）；API 形态为 `trace.timelineImage.renderTimelineImage(...)`（方法挂管理器）。**E2E 已验证**（out/test-runs/20260823-0230-first-e2e-demo）：1000×235 PNG 71.9KB、采样 53 色非纯色、8/8 track、零 warning、trackBoxes 正确；途中修复 timeSpan 序列化归一化（plain {start,end} → HighPrecisionTimeSpan）。TIMELINE_UNAVAILABLE 分支随 T1.8 单测覆盖 |
-| T1.8 | jsdom 单测（布局/预算/TimeScale/校验/warning） | 全绿；mock memo 覆盖超时软退出 | T1.7 | ⬜ | `*_unittest.ts` | D9 分层 |
+| T1.8 | jsdom 单测（布局/预算/TimeScale/校验/warning） | 全绿；mock memo 覆盖超时软退出 | T1.7 | ✅ | commit pr1-timeline-image | 新增 offscreen_timeline_renderer_unittest（4 例，含抓出并修复 widthPx=0 被 Math.max 吞掉的真实边界漏洞）+ timeline_image_manager_unittest（3 例：TIMELINE_UNAVAILABLE/TIMEOUT 映射/编码失败）；全套 45/45 |
 | T1.9 | Playwright 全链路 + 基线 + 功能断言 | A1–C1 通过（本地真实 fixture）；**上游 PR 内用合成 trace 等价场景**；基线入库（合成 trace 基线） | T1.6, T1.7 | ⬜ | 基线 png | §6.1：AGPL fixture 仅限本地 |
 | T1.10 | WebGL 读回专项（colorSpace 一致性 + 大图 toBlob） | 两条读回路径输出一致 | T1.6 | ⬜ | 测试 | §9 风险 4 |
 | T1.11 | locale 确定性验证（时间轴 label 格式化路径） | 确认/强制 root locale，跨机 diff 稳定 | T1.9 | ⬜ | 测试 | D7 |

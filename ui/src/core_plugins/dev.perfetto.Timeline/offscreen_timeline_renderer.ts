@@ -138,6 +138,10 @@ export async function renderOffscreenTimeline(
     );
   }
 
+  if (!(widthPx >= 1)) {
+    throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
+  }
+
   const cssWidth = widthPx;
   const cssHeight = top;
   const pixels = cssWidth * devicePixelRatio * cssHeight * devicePixelRatio;
@@ -151,6 +155,21 @@ export async function renderOffscreenTimeline(
         `(${cssWidth}x${cssHeight} @${devicePixelRatio}x)`,
     );
   }
+
+  // Data resolution: like the interactive path, quantized to a power of two,
+  // but computed for `widthPx / dataResolutionScale` so that (with the
+  // default 0.5) a 2x canvas fetches 1x data.
+  const maybeResolution = calculateResolution(
+    timeSpan,
+    Math.max(1, widthPx / dataResolutionScale),
+  );
+  if (!maybeResolution.ok) {
+    throw new Error(
+      `renderOffscreenTimeline: cannot compute resolution: ` +
+        `${maybeResolution.error}`,
+    );
+  }
+  const resolution: duration = maybeResolution.value;
 
   // ------------------------------------------------------------ canvases
   // Layer model mirrors the interactive timeline: a WebGL canvas below and a
@@ -182,21 +201,6 @@ export async function renderOffscreenTimeline(
     bottom: cssHeight,
   });
   const timescale = new TimeScale(timeSpan, timelineRect);
-
-  // Data resolution: like the interactive path, quantized to a power of two,
-  // but computed for `widthPx / dataResolutionScale` so that (with the
-  // default 0.5) a 2x canvas fetches 1x data.
-  const maybeResolution = calculateResolution(
-    timeSpan,
-    Math.max(1, widthPx / dataResolutionScale),
-  );
-  if (!maybeResolution.ok) {
-    throw new Error(
-      `renderOffscreenTimeline: cannot compute resolution: ` +
-        `${maybeResolution.error}`,
-    );
-  }
-  const resolution: duration = maybeResolution.value;
 
   const timedOutTracks: string[] = [];
   const renderContexts = new Map<TrackView, TrackRenderContext>();
