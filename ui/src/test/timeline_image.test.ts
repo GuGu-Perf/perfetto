@@ -58,6 +58,12 @@ interface TestTrace {
         top: number;
         height: number;
       }>;
+      perf: {
+        loadMs: number;
+        drawMs: number;
+        encodeMs: number;
+        elapsedMs: number;
+      };
     }>;
   };
 }
