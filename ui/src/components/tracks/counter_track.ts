@@ -24,6 +24,7 @@ import {
   type CancellationSignal,
   TASK_CANCELLED,
   AsyncMemo,
+  type AsyncMemoOptions,
   AtomicTaskQueue,
 } from '../../base/async_memo';
 import {Icons} from '../../base/semantic_icons';
@@ -641,49 +642,94 @@ export class CounterTrack implements TrackRenderer {
     };
   }
 
-  private useData(
-    trackCtx: TrackRenderContext,
-  ): {counters: DataFrame; limits: Limits} | undefined {
-    const {size, visibleWindow} = trackCtx;
+  whenDataReady(trackCtx: TrackRenderContext): Promise<void> {
+    return this.waitForData(trackCtx);
+  }
 
-    // Step 0: Call onInit with a constant key
-    const initResult = this.initSlot.use({
-      key: {init: true},
-      compute: () => this.onInitFn?.() ?? Promise.resolve(),
-    });
-
+  private async waitForData(trackCtx: TrackRenderContext): Promise<void> {
+    // Mirror useData()'s memo sequencing so both paths share keys.
+    const initResult = this.initSlot.use(this.initSlotOptions());
     if (initResult.isPending) {
-      return undefined;
+      await this.initSlot.waitFor(this.initSlotOptions());
     }
 
-    // Step 1: Get the mipmap table (created once per SQL source + options)
-    // Include yMode and yDisplay in key since they affect the value expression
+    const tableResult = this.tableSlot.use(this.tableSlotOptions());
+    let table = tableResult.data;
+    if (table === undefined) {
+      await this.tableSlot.waitFor(this.tableSlotOptions());
+      table = this.tableSlot.use(this.tableSlotOptions()).data;
+      if (table === undefined) return;
+    }
+
+    const bounds = this.computeQueryBounds(trackCtx);
+    await this.dataSlot.waitFor(this.dataSlotOptions(table, bounds));
+  }
+
+  private initSlotOptions() {
+    return {
+      key: {init: true} as const,
+      compute: () => this.onInitFn?.() ?? Promise.resolve(),
+    };
+  }
+
+  private tableSlotOptions(): AsyncMemoOptions<
+    MipmapTableResult,
+    {sqlSource: string; yMode: string; yDisplay: string}
+  > {
     const {yMode, yDisplay} = this;
-    const tableResult = this.tableSlot.use({
+    return {
       key: {
         sqlSource: this.sqlSource,
         yMode,
         yDisplay,
       },
       compute: () => this.createMipmapTable(),
-    });
+    };
+  }
 
-    const table = tableResult.data;
-    if (table === undefined) return undefined;
-
-    // Step 2: Calculate buffered bounds and fetch counter data
+  /**
+   * The time bounds and bucket resolution used for data queries. When the
+   * render context provides explicit `queryBounds` and `resolution` (e.g.
+   * offscreen rendering), use them exactly; otherwise derive padded bounds
+   * around the visible window as usual.
+   */
+  private computeQueryBounds(trackCtx: TrackRenderContext): {
+    start: time;
+    end: time;
+    resolution: duration;
+  } {
+    if (trackCtx.queryBounds) {
+      return {
+        start: trackCtx.queryBounds.start,
+        end: trackCtx.queryBounds.end,
+        resolution: trackCtx.resolution,
+      };
+    }
+    const {visibleWindow, size} = trackCtx;
     const visibleSpan = visibleWindow.toTimeSpan();
     const windowSizePx = Math.max(1, size.width);
     const bucketSize = this.computeBucketSize(
       visibleSpan.duration,
       windowSizePx,
     );
-    const bounds = this.bufferedBounds.update(visibleSpan, bucketSize);
+    return this.bufferedBounds.update(visibleSpan, bucketSize);
+  }
 
-    // Step 3: Fetch counter data using QuerySlot
-    const queryStart = bounds.start;
-    const queryEnd = bounds.end;
-    const dataResult = this.dataSlot.use({
+  private dataSlotOptions(
+    table: MipmapTableResult,
+    bounds: {start: time; end: time; resolution: duration},
+  ): AsyncMemoOptions<
+    DataFrame,
+    {
+      start: time;
+      end: time;
+      resolution: duration;
+      yMode: string;
+      yDisplay: string;
+    }
+  > {
+    const {yMode, yDisplay} = this;
+    return {
       key: {
         start: bounds.start,
         end: bounds.end,
@@ -691,12 +737,12 @@ export class CounterTrack implements TrackRenderer {
         yMode,
         yDisplay,
       },
-      compute: async (signal) => {
+      compute: async (signal: CancellationSignal) => {
         return await this.trace.taskTracker.track(
           this.fetchCounterData(
             table.tableName,
-            queryStart,
-            queryEnd,
+            bounds.start,
+            bounds.end,
             bounds.resolution,
             signal,
           ),
@@ -704,7 +750,30 @@ export class CounterTrack implements TrackRenderer {
         );
       },
       retainOn: ['start', 'end', 'resolution'],
-    });
+    };
+  }
+
+  private useData(
+    trackCtx: TrackRenderContext,
+  ): {counters: DataFrame; limits: Limits} | undefined {
+    // Step 0: Call onInit with a constant key
+    const initResult = this.initSlot.use(this.initSlotOptions());
+
+    if (initResult.isPending) {
+      return undefined;
+    }
+
+    // Step 1: Get the mipmap table (created once per SQL source + options)
+    const tableResult = this.tableSlot.use(this.tableSlotOptions());
+
+    const table = tableResult.data;
+    if (table === undefined) return undefined;
+
+    // Step 2: Calculate query bounds (buffered unless overridden).
+    const bounds = this.computeQueryBounds(trackCtx);
+
+    // Step 3: Fetch counter data using QuerySlot
+    const dataResult = this.dataSlot.use(this.dataSlotOptions(table, bounds));
 
     const counters = dataResult.data;
     if (counters === undefined) return undefined;

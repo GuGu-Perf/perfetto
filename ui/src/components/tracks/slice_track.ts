@@ -25,6 +25,7 @@ import type {
 import {ensureExists} from '../../base/assert';
 import {Monitor} from '../../base/monitor';
 import {
+  type AsyncMemoOptions,
   type CancellationSignal,
   AsyncMemo,
   TASK_CANCELLED,
@@ -801,27 +802,96 @@ export class SliceTrack<T extends RowSchema> implements TrackRenderer {
     return result.maybeFirstRow({rowCount: NUM})?.rowCount ?? 0;
   }
 
-  private useData(trackCtx: TrackRenderContext): DataFrame<T> | undefined {
-    const {resolution, visibleWindow} = trackCtx;
+  whenDataReady(trackCtx: TrackRenderContext): Promise<void> {
+    return this.waitForData(trackCtx);
+  }
 
+  private useData(trackCtx: TrackRenderContext): DataFrame<T> | undefined {
     const dataset = this.getDataset();
     const sqlSource = generateRenderQuery(dataset);
 
     // 1. Create the mipmap tables which only depend on the sql query source
-    const {data: tables} = this.tablesSlot.use({
-      key: {sqlSource},
-      compute: () => this.createTables(sqlSource),
-    });
+    const {data: tables} = this.tablesSlot.use(
+      this.tablesSlotOptions(sqlSource),
+    );
 
     // Can't do anything until we have the tables.
     if (!tables) return undefined;
 
     // 2. Load the slices into a data frame based on the visible window and
     // resolution, which could change every frame.
-    const visibleSpan = visibleWindow.toTimeSpan();
-    const bounds = this.bufferedBounds.update(visibleSpan, resolution);
+    const bounds = this.computeQueryBounds(trackCtx);
 
-    const {data: dataFrame} = this.dataFrameSlot.use({
+    const {data: dataFrame} = this.dataFrameSlot.use(
+      this.dataSlotOptions(sqlSource, bounds, dataset, tables),
+    );
+
+    return dataFrame;
+  }
+
+  private async waitForData(trackCtx: TrackRenderContext): Promise<void> {
+    const dataset = this.getDataset();
+    const sqlSource = generateRenderQuery(dataset);
+    await this.tablesSlot.waitFor(this.tablesSlotOptions(sqlSource));
+    // After settling, use() returns the cached tables synchronously.
+    const {data: tables} = this.tablesSlot.use(
+      this.tablesSlotOptions(sqlSource),
+    );
+    if (!tables) return;
+    const bounds = this.computeQueryBounds(trackCtx);
+    await this.dataFrameSlot.waitFor(
+      this.dataSlotOptions(sqlSource, bounds, dataset, tables),
+    );
+  }
+
+  /**
+   * The time bounds used for data queries. When the render context provides
+   * explicit `queryBounds` (e.g. offscreen rendering), use them exactly;
+   * otherwise derive padded bounds around the visible window as usual.
+   */
+  private computeQueryBounds(trackCtx: TrackRenderContext): {
+    start: time;
+    end: time;
+    resolution: duration;
+  } {
+    const {resolution, visibleWindow} = trackCtx;
+    if (trackCtx.queryBounds) {
+      return {
+        start: trackCtx.queryBounds.start,
+        end: trackCtx.queryBounds.end,
+        resolution,
+      };
+    }
+    return this.bufferedBounds.update(visibleWindow.toTimeSpan(), resolution);
+  }
+
+  // Options objects shared between useData() and whenDataReady() so the memo
+  // keys are guaranteed to be identical for both paths.
+  private tablesSlotOptions(
+    sqlSource: string,
+  ): AsyncMemoOptions<Tables, {sqlSource: string}> {
+    return {
+      key: {sqlSource},
+      compute: () => this.createTables(sqlSource),
+    };
+  }
+
+  private dataSlotOptions(
+    sqlSource: string,
+    bounds: {start: time; end: time; resolution: duration},
+    dataset: SourceDataset<T>,
+    tables: Tables,
+  ): AsyncMemoOptions<
+    DataFrame<T>,
+    {
+      sqlSource: string;
+      start: time;
+      end: time;
+      resolution: duration;
+      key: string | undefined;
+    }
+  > {
+    return {
       // sqlSource is constant for most tracks with a static dataset, but
       // there are cases (e.g. raw ftrace tracks) where the query can
       // change dynamically.
@@ -832,7 +902,7 @@ export class SliceTrack<T extends RowSchema> implements TrackRenderer {
         resolution: bounds.resolution,
         key: this.attrs.getKey?.(),
       },
-      compute: async (signal) => {
+      compute: async (signal: CancellationSignal) => {
         const promise = (async () => {
           // Load complete and incomplete slices in a single query
           const instants = await this.getInstantBuffers(
@@ -869,9 +939,7 @@ export class SliceTrack<T extends RowSchema> implements TrackRenderer {
         return result;
       },
       retainOn: ['start', 'end', 'resolution'],
-    });
-
-    return dataFrame;
+    };
   }
 
   private async getInstantBuffers(

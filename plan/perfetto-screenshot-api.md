@@ -741,7 +741,7 @@ trace.pftrace
 | T1.0 | UI 测试环境搭建（node_modules、`ui/run-integrationtests`） | 本地跑通任一官方既有 Playwright 用例（环境可信基线）；确认 fork 侧 CI（GitHub Actions）可跑 UI 集成测试 | — | 🔵 | 环境记录 | §6.4 CI 看护载体；2026-08-23 依赖经代理装毕；官方用例验证与 fork CI 确认待做（未达验收不得标 ✅） |
 | T1.2 | AsyncMemo 暴露 pending 完成 Promise | whenDataReady 可基于其实现；既有 use() 行为零变化 | — | ✅ | commit pr1-timeline-image | §3.3.1 事实 3；新增 AsyncMemo.waitFor()（单次调度 + settle 信号循环，key 被替换/invalidate/dispose 均正确解除等待），单测 18/18 过（新增 5 例） |
 | T1.3 | 接口增量：`queryBounds` + `whenDataReady?` | 可选成员、缺省行为不变；插件文档同步 | — | ✅ | commit pr1-timeline-image | §3.3.2；TrackRenderContext.queryBounds（性能提示语义）+ TrackRenderer.whenDataReady?（不 reject、未实现=立即就绪）；tsc/eslint/prettier 过；插件文档（docs/visualization/extending-the-ui）随 PR 2 文档任务一并更新 |
-| T1.4 | slice/counter track 采用 whenDataReady + queryBounds | 离屏数据就绪可等待；查询量 1x | T1.3 | ⬜ | commit | |
+| T1.4 | slice/counter track 采用 whenDataReady + queryBounds | 离屏数据就绪可等待；查询量 1x | T1.3 | ✅ | commit pr1-timeline-image | 两个 track 的 memo 选项提取为共享 builder（use 与 waitFor 键必然一致）；queryBounds 时绕过 3x BufferedBounds 用精确窗口（counter 同时改用 ctx.resolution）；测试 14/14、tsc/eslint/prettier 过 |
 | T1.5 | offscreen_timeline_renderer 两段式（warm-up → barrier → render + 定点迭代） | A2 窗口全链路出图、无棋盘格 | T0.3, T1.2–T1.4 | ⬜ | commit | §3.3.3 |
 | T1.6 | GL context 单例 + `preserveDrawingBuffer` 读回 | 连续 20 张无 context lost；非纯色断言过 | T1.5 | ⬜ | commit | §3.3.4 |
 | T1.7 | public/timeline_image.ts + core/timeline_image_manager.ts + Trace 挂载 | 控制台 `trace.renderTimelineImage({...})` 出图；Timeline 缺席时 TIMELINE_UNAVAILABLE | T1.5 | ⬜ | commit | minimap 模式，§3.2 |
