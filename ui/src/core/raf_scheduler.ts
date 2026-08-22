@@ -157,20 +157,26 @@ export class RafScheduler implements Raf {
     }
   }
 
-  // Canvas redraw freeze, used by the offscreen timeline renderer: while
-  // frozen, canvas redraw callbacks are deferred (not dropped) so an
-  // in-flight offscreen render cannot race the interactive timeline's track
-  // data loads (single-entry AsyncMemo eviction). DOM redraws are unaffected.
-  private canvasRedrawsFrozen = 0;
+  // Redraw freeze, used by the offscreen timeline renderer: while frozen,
+  // both DOM and canvas redraws are deferred (not dropped) so an in-flight
+  // offscreen render cannot race the interactive timeline's track data
+  // loads (single-entry AsyncMemo eviction via either redraw path).
+  private redrawsFrozen = 0;
   private canvasRedrawPending = false;
+  private domRedrawPending = false;
 
   freezeCanvasRedraws(): void {
-    this.canvasRedrawsFrozen++;
+    this.redrawsFrozen++;
   }
 
   thawCanvasRedraws(): void {
-    this.canvasRedrawsFrozen = Math.max(0, this.canvasRedrawsFrozen - 1);
-    if (this.canvasRedrawsFrozen === 0 && this.canvasRedrawPending) {
+    this.redrawsFrozen = Math.max(0, this.redrawsFrozen - 1);
+    if (this.redrawsFrozen > 0) return;
+    if (this.domRedrawPending) {
+      this.domRedrawPending = false;
+      this.syncDomRedraw();
+    }
+    if (this.canvasRedrawPending) {
       this.canvasRedrawPending = false;
       this.syncCanvasRedraw();
     }
@@ -193,11 +199,14 @@ export class RafScheduler implements Raf {
     const tStart = performance.now();
     this.animationCallbacks.forEach((cb) => cb(lastFrameMs));
     const tAnim = performance.now();
-    doFullRedraw && this.syncDomRedraw();
-    const tDom = performance.now();
-    if (this.canvasRedrawsFrozen > 0) {
+    if (this.redrawsFrozen > 0) {
+      if (doFullRedraw) this.domRedrawPending = true;
       this.canvasRedrawPending = true;
     } else {
+      doFullRedraw && this.syncDomRedraw();
+    }
+    const tDom = performance.now();
+    if (this.redrawsFrozen === 0) {
       this.syncCanvasRedraw();
     }
     const tCanvas = performance.now();
