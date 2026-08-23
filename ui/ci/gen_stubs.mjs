@@ -31,47 +31,55 @@ const bin = (name) => path.join(UI_DIR, 'node_modules', '.bin', name);
 
 const protosJs = path.join(GEN_DIR, 'protos.js');
 execFileSync(
-  bin('pbjs'),
-  [
-    '--no-beautify',
-    '--force-number',
-    '--no-delimited',
-    '--no-verify',
-    '-t',
-    'static-module',
-    '-w',
-    'es6',
-    '-p',
-    ROOT_DIR,
-    '-o',
-    protosJs,
-  ].concat(PROTO_INPUTS),
-  {stdio: 'inherit'},
+    bin('pbjs'),
+    [
+      '--no-beautify',
+      '--force-number',
+      '--no-delimited',
+      '--no-verify',
+      '-t',
+      'static-module',
+      '-w',
+      'es6',
+      '-p',
+      ROOT_DIR,
+      '-o',
+      protosJs,
+    ].concat(PROTO_INPUTS),
+    {stdio: 'inherit'},
 );
 
 const protosTs = path.join(GEN_DIR, 'protos.d.ts');
-execFileSync(bin('pbts'), ['--no-comments', '-p', ROOT_DIR, '-o', protosTs, protosJs], {
-  stdio: 'inherit',
-});
+const pbtsArgs = ['--no-comments', '-p', ROOT_DIR, '-o', protosTs, protosJs];
+execFileSync(bin('pbts'), pbtsArgs, {stdio: 'inherit'});
 // Drop the `import Long = require("long")` line pbts emits; see
 // postProcessProtosDts() in build.mjs.
 let dts = fs.readFileSync(protosTs, 'utf8');
 dts = dts.replace(/import Long = require\("long"\);\r?\n/g, '');
 fs.writeFileSync(protosTs, dts);
 
-const STUB_JS = (mod) => `// Lightweight-CI stub for the emscripten module ${mod} (built by ninja in
+// Lowercase wrapper: eslint's new-cap rule flags factories named like
+// constructors.
+const stubJs = (mod) => `// Lightweight-CI stub for the emscripten module ${mod}
+// (built by ninja in
 // full builds). Unit tests never instantiate it; they mock the engine.
 export default async function ${mod}_wasm() {
   throw new Error('${mod} wasm module is not built in the lightweight CI');
 }
 `;
 
-for (const mod of ['traceconv', 'proto_utils', 'trace_processor', 'trace_processor_memory64']) {
+const WASM_MODULES = [
+  'traceconv',
+  'proto_utils',
+  'trace_processor',
+  'trace_processor_memory64',
+];
+for (const mod of WASM_MODULES) {
   fs.copyFileSync(
-    path.join(UI_DIR, 'ci', 'wasm_module.d.ts'),
-    path.join(GEN_DIR, `${mod}.d.ts`),
+      path.join(UI_DIR, 'ci', 'wasm_module.d.ts'),
+      path.join(GEN_DIR, `${mod}.d.ts`),
   );
-  fs.writeFileSync(path.join(GEN_DIR, `${mod}.js`), STUB_JS(mod));
+  fs.writeFileSync(path.join(GEN_DIR, `${mod}.js`), stubJs(mod));
 }
 
 console.log('gen artifacts written to', GEN_DIR);

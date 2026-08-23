@@ -57,7 +57,8 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
     helper = new PerfettoTestHelper(page);
     await helper.openTraceFile('timeline_image_synth.json');
     await page.waitForFunction(
-      () => !!(window as {ctx?: {traceInfo?: unknown}}).ctx?.traceInfo,
+      () =>
+        (window as {ctx?: {traceInfo?: unknown}}).ctx?.traceInfo !== undefined,
       undefined,
       {timeout: 60_000},
     );

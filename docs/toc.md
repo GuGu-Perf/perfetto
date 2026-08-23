@@ -98,6 +98,7 @@
     - [Opening Large Traces](visualization/large-traces.md) {.tag-android .tag-linux .tag-cpp-rust .tag-chrome .tag-perf}
     - [Deep Linking](visualization/deep-linking-to-perfetto-ui.md) {.tag-android .tag-linux .tag-cpp-rust .tag-chrome .tag-perf}
     - [Embedding the UI](visualization/embedding-the-ui.md) {.tag-android .tag-linux .tag-cpp-rust .tag-chrome .tag-perf}
+    - [Exporting a Timeline Image](visualization/exporting-timeline-image.md) {.tag-android .tag-linux .tag-cpp-rust .tag-chrome .tag-perf}
     - [Debug Tracks](analysis/debug-tracks.md) {.tag-android .tag-linux .tag-cpp-rust .tag-chrome .tag-perf}
     - [Heap Dump Explorer](visualization/heap-dump-explorer.md) {.tag-android}
     - [Memscope & Memory Overview](visualization/memscope.md) {.tag-android .tag-linux}

@@ -4,7 +4,10 @@ This page is a reference for the `postMessage` and URL parameter surface used to
 embed the Perfetto UI (`ui.perfetto.dev`) inside an `<iframe>` on a host page.
 
 For a task-oriented walkthrough of the embedding flow, see
-[Embedding the Perfetto UI](/docs/visualization/embedding-the-ui.md). For the
+[Embedding the Perfetto UI](/docs/visualization/embedding-the-ui.md). For
+rendering a timeline as an image (the `renderTimelineImage` action), see
+[Exporting a Timeline Image](/docs/visualization/exporting-timeline-image.md).
+For the
 `window.open()` (new browser tab) variant and for sharing / `appStateHash`
 details, see [Deep linking to the Perfetto UI](/docs/visualization/deep-linking-to-perfetto-ui.md).
 
