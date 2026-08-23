@@ -46,8 +46,9 @@ window.addEventListener('message', (ev) => {
       ev.source.postMessage({perfetto: {
         action: 'renderTimelineImage', id: 'demo-1',
         options: {
-          trackNames: [{name: 'RenderThread', tid: 13585}],
-          trackUris: ['/cpu_freq_cpu0', '/sched_cpu0'],
+          // /thread_<utid> expands to the thread's capability tracks; the
+          // list order is the render order (utid from trace_processor).
+          trackUris: ['/thread_7303', '/cpu_freq_cpu0', '/sched_cpu0'],
           timeSpan: {start: '506734750000000', end: '506736000000000'},
           widthPx: 1200, devicePixelRatio: 1,
         },

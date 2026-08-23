@@ -22,9 +22,10 @@ const SCENARIOS = {
   'G-STD': {
     description: 'User standard working set: RenderThread pinned first, cpu0-3 freq+sched, jank window',
     opts: {
-      trackUris: ['/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
-                  '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3','/thread_7303'],
-      pinTracks: ['/thread_7303'],
+      // List order = render order; the "pinned" thread simply comes first.
+      trackUris: ['/thread_7303',
+                  '/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
+                  '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3'],
       timeSpan: A2_WINDOW,
       widthPx: 1800, devicePixelRatio: 1, perTrackTimeoutMs: 20000,
     },
@@ -44,16 +45,16 @@ const SCENARIOS = {
   'G-E1': {
     trace: EXAMPLE_TRACE,
     workspaceMarker: '/thread_75',
-    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 pinned, standard mode, 4:3 (native API trackNames + aspectRatio)',
+    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 pinned, standard mode, 4:3 (uri-first list order + aspectRatio)',
     opts: {
-      trackUris: ['/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
+      // List order = render order; RenderThread (utid 75) first = "pinned".
+      trackUris: ['/thread_75',
+                  '/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
                   '/cpu_freq_cpu4','/cpu_freq_cpu5','/cpu_freq_cpu6','/cpu_freq_cpu7',
                   '/cpu_freq_cpu8',
                   '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3',
                   '/sched_cpu4','/sched_cpu5','/sched_cpu6','/sched_cpu7',
                   '/sched_cpu8'],
-      trackNames: [{name: 'RenderThread', tid: 4543}],
-      pinTracks: ['/thread_75'],
       timeSpan: {start: '3428202643641', end: '3428410622726'},
       aspectRatio: 4 / 3,
       devicePixelRatio: 1, perTrackTimeoutMs: 20000,

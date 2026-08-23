@@ -108,6 +108,14 @@ export interface OffscreenTimelineRenderOptions {
     node: TrackNode;
     depth: number;
   }>;
+  // Exact canvas height in CSS px. The track stack's natural height is
+  // `axis + sum(track heights)`; when this is shorter the remainder is
+  // background padding (deterministic output for report grids); when it is
+  // taller the content is clipped and the result carries a TRUNCATED
+  // warning. Without it the canvas is exactly as tall as the content
+  // (zero-config default collection is capped at DEFAULT_MAX_HEIGHT_PX
+  // instead).
+  readonly heightPx?: number;
   readonly timeSpan: HighPrecisionTimeSpan;
   // Width of the produced image in CSS pixels. Mutually exclusive with
   // `aspectRatio`; when neither is given the width defaults to 1920.
@@ -175,6 +183,7 @@ export async function renderOffscreenTimeline(
     trackUris,
     timeSpan,
     widthPx,
+    heightPx,
     aspectRatio,
     devicePixelRatio = 2,
     dataResolutionScale = 0.5,
@@ -204,6 +213,9 @@ export async function renderOffscreenTimeline(
   }
   if (widthPx !== undefined && !(widthPx >= 1)) {
     throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
+  }
+  if (heightPx !== undefined && !(heightPx >= 1)) {
+    throw new Error('renderOffscreenTimeline: heightPx must be >= 1');
   }
   // A zero-width or inverted span (start >= end) would produce a degenerate
   // TimeScale (division by zero) and a blank-but-valid-looking canvas; reject
@@ -283,12 +295,16 @@ export async function renderOffscreenTimeline(
   // Set when the zero-config default collection is cut short by the height
   // cap; surfaced as a TRUNCATED warning on the public result.
   let truncatedByDefaultCap = false;
+  // The zero-config default collection is capped to one viewable page; with
+  // an explicit heightPx the caller's page height is the budget instead.
+  const defaultCollectionBudget =
+    axisHeight + (heightPx ?? DEFAULT_MAX_HEIGHT_PX);
   for (const {node, depth, uri, isGroupHeader, expanded} of entries) {
-    // Only the zero-config default collection is capped; explicit
-    // trackUris/trackNames sets are honored up to the canvas guardrail.
+    // Only the zero-config default collection is capped; explicit trackUris
+    // sets are honored up to the canvas guardrail.
     if (
       trackNodes !== undefined &&
-      top + nodeHeight(trace, node) > axisHeight + DEFAULT_MAX_HEIGHT_PX
+      top + nodeHeight(trace, node) > defaultCollectionBudget
     ) {
       truncatedByDefaultCap = true;
       break;
@@ -318,6 +334,14 @@ export async function renderOffscreenTimeline(
         `(missing: ${missingTracks.join(', ')})`,
     );
   }
+  // With name/pin selectors gone, URIs are the only selector and unmatched
+  // entries are a caller bug: reject instead of rendering a subset silently.
+  if (missingTracks.length > 0) {
+    throw new Error(
+      `renderOffscreenTimeline: unknown track uris: ` +
+        `${missingTracks.join(', ')}`,
+    );
+  }
 
   // Webfonts load asynchronously with font-display: swap; drawing text
   // before they are ready would use fallback glyphs and differ between
@@ -327,9 +351,14 @@ export async function renderOffscreenTimeline(
     await document.fonts.ready;
   }
 
-  // Shape: the height is derived from the track set (layout above), so the
-  // width is either given explicitly or solved from the aspect ratio.
-  const cssHeight = top;
+  // Shape: the canvas height is the track content height, unless the caller
+  // pinned an exact canvas height (padding below shorter content, TRUNCATED
+  // clipping above taller content). The width is either given explicitly or
+  // solved from the aspect ratio over the final canvas height.
+  const contentHeight = top;
+  const truncatedByHeightPx =
+    heightPx !== undefined && contentHeight > heightPx;
+  const cssHeight = heightPx ?? contentHeight;
   const cssWidth =
     widthPx ??
     (aspectRatio !== undefined
@@ -588,8 +617,9 @@ export async function renderOffscreenTimeline(
     trackBoxes,
     timedOutTracks,
     warnings: [
-      ...(missingTracks.length > 0 ? (['TRACK_MISSING'] as const) : []),
-      ...(truncatedByDefaultCap ? (['TRUNCATED'] as const) : []),
+      ...((truncatedByDefaultCap || truncatedByHeightPx)
+        ? (['TRUNCATED'] as const)
+        : []),
     ],
     devicePixelRatio: dpr,
     rounds,

@@ -120,13 +120,14 @@ test.describe.serial('timeline image rendering', () => {
     await helper.page.close();
   });
 
-  test('A2: jank cluster renders non-solid with pinned tracks first', async ({}, testInfo) => {
+  test('A2: jank cluster renders non-solid with the requested order', async ({}, testInfo) => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
       const r = await trace.timelineImage.renderTimelineImage({
-        trackUris: ['/sched_cpu0', '/sched_cpu1', '/sched_cpu2', '/sched_cpu3'],
-        pinTracks: ['/sched_cpu2'],
+        // The list order is the render order: the "pinned" track simply
+        // comes first.
+        trackUris: ['/sched_cpu2', '/sched_cpu0', '/sched_cpu1', '/sched_cpu3'],
         timeSpan,
         widthPx: 1000,
         perTrackTimeoutMs: 20_000,
@@ -157,7 +158,7 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.height).toBeGreaterThan(0);
     expect(result.warnings).toEqual([]);
     expect(result.trackUris).toEqual([
-      '/sched_cpu2', // pinned first
+      '/sched_cpu2', // first in the list, rendered on top
       '/sched_cpu0',
       '/sched_cpu1',
       '/sched_cpu3',
@@ -480,13 +481,15 @@ test.describe.serial('timeline image rendering', () => {
     }
   });
 
-  test('T1.27/T1.28: trackNames resolution + aspectRatio shape', async () => {
+  test('thread uri expands to its capability tracks; aspectRatio shape', async () => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
       const r = await trace.timelineImage.renderTimelineImage({
-        trackUris: ['/sched_cpu0'],
-        trackNames: [{name: 'RenderThread', tid: 13585}],
+        // /thread_<utid> renders every capability track of the thread;
+        // the utid comes from trace_processor, e.g.
+        // select utid from thread where tid = 13585.
+        trackUris: ['/sched_cpu0', '/thread_7303'],
         timeSpan,
         aspectRatio: 4 / 3,
         devicePixelRatio: 1,
@@ -496,39 +499,42 @@ test.describe.serial('timeline image rendering', () => {
         width: r.width,
         height: r.height,
         warnings: [...r.warnings],
+        uris: r.trackBoxes.map((b) => b.uri),
         names: r.trackBoxes.map((b) => b.name),
       };
     }, A2_WINDOW);
-    // RenderThread resolved by name+tid: the headless group expands to the
-    // thread's state + slice tracks, appended after the explicit uri list
-    // (pinTracks is what reorders, per the explicit-list ordering contract).
     expect(result.warnings).toEqual([]);
-    expect(result.names.slice(1, 3)).toEqual([
-      'RenderThread 13585',
-      'RenderThread 13585',
+    // The thread group expands to its state + slice tracks, after the
+    // explicit uri (list order is the render order).
+    expect(result.uris).toEqual([
+      '/sched_cpu0',
+      '/process_885/thread_7303_state',
+      '/slice_301',
     ]);
-    expect(result.names[0]).toBe('CPU 0 Scheduling');
+    expect(result.names[1]).toBe('RenderThread 13585');
     // Height is track-derived; the width must be exactly height * 4/3.
     expect(result.width).toBe(Math.round(result.height * (4 / 3)));
   });
 
-  test('T1.27: unmatched trackNames produce TRACK_MISSING', async () => {
-    const result = await helper.page.evaluate(async (win) => {
+  test('unknown trackUris reject the render', async () => {
+    const err = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
-      const r = await trace.timelineImage.renderTimelineImage({
-        trackUris: ['/sched_cpu0'],
-        trackNames: [{name: 'NoSuchThread', tid: 999999}],
-        timeSpan,
-        widthPx: 800,
-        devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
-      });
-      return {warnings: [...r.warnings], trackCount: r.trackBoxes.length};
+      try {
+        await trace.timelineImage.renderTimelineImage({
+          trackUris: ['/sched_cpu0', '/does/not/exist'],
+          timeSpan,
+          widthPx: 800,
+          devicePixelRatio: 1,
+          perTrackTimeoutMs: 20_000,
+        });
+        return null;
+      } catch (e) {
+        return String(e);
+      }
     }, A2_WINDOW);
-    expect(result.warnings).toContain('TRACK_MISSING');
-    // The explicit uri still renders.
-    expect(result.trackCount).toBe(1);
+    expect(err).toContain('unknown track uris');
+    expect(err).toContain('/does/not/exist');
   });
 
   test('bounds: zero-width timeSpan rejects', async () => {
@@ -565,30 +571,6 @@ test.describe.serial('timeline image rendering', () => {
     expect(err).toContain('does not overlap trace bounds');
   });
 
-  test('bounds: pinTracks with a non-rendered uri warns TRACK_NOT_RENDERED', async () => {
-    const result = await helper.page.evaluate(async (win) => {
-      const trace = window.ctx as unknown as TestTrace;
-      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
-      const r = await trace.timelineImage.renderTimelineImage({
-        trackUris: ['/sched_cpu0'],
-        pinTracks: ['/sched_cpu0', '/does/not/exist'],
-        timeSpan,
-        widthPx: 800,
-        devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
-      });
-      return {
-        warnings: [...r.warnings],
-        trackUris: r.trackBoxes.map((t) => t.uri),
-      };
-    }, A2_WINDOW);
-    // The renderable pin still applies; the unknown pin is reported, not
-    // silently skipped.
-    expect(result.warnings).toContain('TRACK_NOT_RENDERED');
-    expect(result.warnings).not.toContain('TRACK_MISSING');
-    expect(result.trackUris).toEqual(['/sched_cpu0']);
-  });
-
   test('concurrency: two overlapping renders both succeed, byte-identical', async () => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
@@ -616,5 +598,87 @@ test.describe.serial('timeline image rendering', () => {
     }, A2_WINDOW);
     expect(result.warnings).toEqual([]);
     expect(result.bHex).toBe(result.aHex);
+  });
+
+  test('heightPx pads short content to an exact canvas height', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      // Natural height of two tracks + axis is well below 1200.
+      const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: ['/sched_cpu0', '/sched_cpu1'],
+        timeSpan,
+        widthPx: 800,
+        heightPx: 1200,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 20_000,
+      });
+      return {width: r.width, height: r.height, warnings: [...r.warnings]};
+    }, A2_WINDOW);
+    expect(result.height).toBe(1200);
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('heightPx clips taller content with a TRUNCATED warning', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      // Ten tracks cannot fit 30px; content is clipped and reported.
+      const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: [
+          '/sched_cpu0', '/sched_cpu1', '/sched_cpu2', '/sched_cpu3',
+          '/cpu_freq_cpu0', '/cpu_freq_cpu1', '/cpu_freq_cpu2',
+          '/cpu_freq_cpu3', '/thread_7303', '/process_885',
+        ],
+        timeSpan,
+        widthPx: 800,
+        heightPx: 30,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 20_000,
+      });
+      return {height: r.height, warnings: [...r.warnings]};
+    }, A2_WINDOW);
+    expect(result.height).toBe(30);
+    expect(result.warnings).toContain('TRUNCATED');
+  });
+
+  test('listTracks: postMessage discovery returns the workspace with uris', async () => {
+    const result = await helper.page.evaluate(
+      () =>
+        new Promise<{error?: string; tracks?: unknown[]}>((resolve) => {
+          const onMsg = (ev: MessageEvent) => {
+            const d = (ev.data as {perfetto?: {action?: string; id?: string; error?: string; tracks?: unknown[]}}).perfetto;
+            if (d?.action === 'listTracksResult' && d.id === 't1') {
+              window.removeEventListener('message', onMsg);
+              resolve({error: d.error, tracks: d.tracks});
+            }
+          };
+          window.addEventListener('message', onMsg);
+          window.postMessage({perfetto: {action: 'listTracks', id: 't1'}}, '*');
+        }),
+    );
+    expect(result.error).toBeUndefined();
+    const tracks = result.tracks! as {
+      uri: string | null;
+      name: string;
+      path: string;
+      isGroup: boolean;
+    }[];
+    expect(tracks.length).toBeGreaterThan(100);
+    // The thread group, its state track and a per-CPU track are all
+    // discoverable by display path, with the exact uris the renderer takes.
+    const rt = tracks.filter((t) => t.path.includes('RenderThread 13585'));
+    expect(rt.some((t) => t.uri === '/thread_7303')).toBe(true);
+    expect(
+      rt.some((t) => t.uri === '/process_885/thread_7303_state'),
+    ).toBe(true);
+    expect(
+      tracks.some((t) => t.name === 'CPU 0 Scheduling' && t.uri === '/sched_cpu0'),
+    ).toBe(true);
+    // Groups the UI shows (e.g. CPU Frequency) are listed even though they
+    // have no URI of their own.
+    expect(
+      tracks.some((t) => t.name === 'CPU Frequency' && t.uri === null && t.isGroup),
+    ).toBe(true);
   });
 });

@@ -103,8 +103,10 @@ iframe.contentWindow.postMessage(
         action: 'renderTimelineImage',
         id: reqId,
         options: {
-          trackNames: [{name: 'RenderThread', tid: 4543}],
-          trackUris: ['/cpu_freq_cpu0', '/sched_cpu0'],
+          // The list order is the render order (top to bottom).
+          // /thread_<utid> expands to every capability track of the thread;
+          // obtain the utid via SQL: select utid from thread where tid = 4543.
+          trackUris: ['/thread_7303', '/cpu_freq_cpu0'],
           timeSpan: {start: '3428202643641', end: '3428410622726'},
           widthPx: 1200,           // or aspectRatio (mutually exclusive)
           devicePixelRatio: 1,
@@ -148,6 +150,33 @@ Semantics:
   overlays ever appear in the image.
 - The result message is posted to `event.origin` when known (`'*'` under
   cross-origin isolation).
+
+### Listing tracks (`listTracks`)
+
+Selection for `renderTimelineImage` is by workspace track URI. To map what
+the UI shows (threads, per-CPU tracks, groups) to URIs, list the live
+workspace tree:
+
+```js
+const reqId = 'tracks-1';
+iframe.contentWindow.postMessage(
+    {perfetto: {action: 'listTracks', id: reqId}}, '*');
+
+window.addEventListener('message', (ev) => {
+  const d = ev.data?.perfetto;
+  if (d?.action === 'listTracksResult' && d.id === reqId) {
+    if (d.error) { /* no trace loaded, or failure: d.error */ return; }
+    const tracks = d.tracks;
+    // [{uri: '/thread_7303' | null, name: 'RenderThread 13585',
+    //   path: 'com.example.app › RenderThread 13585', isGroup: false}, ...]
+  }
+});
+```
+
+Held until a trace is loaded (60s), like render requests. Grouping nodes the
+UI displays (e.g. "CPU Frequency") are listed with `uri: null`; their
+children carry the URIs to render. The typical batch flow is
+load trace -> `listTracks` -> filter tracks caller-side -> render.
 
 ## String commands
 

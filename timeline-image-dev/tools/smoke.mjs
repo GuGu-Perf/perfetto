@@ -70,8 +70,9 @@ for (const f of FIXTURES) {
     const out = [];
     // S1 zero-config default: capped at 2160px + TRUNCATED when full set is taller.
     out.push(await shot({widthPx: 1200, devicePixelRatio: 1, perTrackTimeoutMs: 30000}, 'default'));
-    // S2 key-window set (user-approved): full-CPU freq+sched + key thread(s) PINNED first.
-    // Resolve thread group URIs by "<name> <tid>" title so pinTracks can order them.
+    // S2 key-window set (user-approved): full-CPU freq+sched + key thread(s).
+    // Resolve thread group URIs by "<name> <tid>" title (in-page discovery;
+    // the API itself only accepts URIs).
     const threadGroups = [];
     const findThreads = (n) => {
       for (const t of [spec.thread].concat(spec.extraThread ? [spec.extraThread] : [])) {

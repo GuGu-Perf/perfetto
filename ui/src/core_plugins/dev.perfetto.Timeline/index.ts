@@ -83,8 +83,7 @@ export default class TimelinePlugin implements PerfettoPlugin {
 
 /**
  * Adapter between the public TimelineImageManager and the offscreen renderer:
- * resolves the default track set, applies pin ordering and maps missing
- * tracks to warnings consumed by the caller of the render function.
+ * resolves the default track set and validates the time span.
  */
 async function renderTimelineImageAdapter(
   trace: TraceImpl,
@@ -94,8 +93,7 @@ async function renderTimelineImageAdapter(
   // interactive tree shows — group header rows (summary/headless
   // containers, expanded or collapsed) plus leaf tracks, in tree order.
   // Explicit trackUris keeps the flat-URI semantics (headless URIs expand
-  // to their leaf descendants). trackNames resolve against the workspace
-  // and merge into trackUris.
+  // to their leaf descendants); the list order is the render order.
   // A trace can be loaded (traceInfo available) while plugins are still
   // building the workspace; rendering then would mis-report every URI as
   // missing. Wait briefly for the first tracks to appear.
@@ -123,24 +121,9 @@ async function renderTimelineImageAdapter(
     );
   }
 
-  const {resolvedNameUris, unmatchedNames} = resolveTrackNames(
-    trace,
-    opts.trackNames ?? [],
-  );
   const defaultNodes = opts.trackUris
     ? undefined
     : collectDefaultTrackNodes(trace.defaultWorkspace.tracks);
-  const requested = [
-    ...(opts.trackUris ?? []),
-    ...resolvedNameUris.filter((uri) => !(opts.trackUris ?? []).includes(uri)),
-  ];
-  const pinned = opts.pinTracks ?? [];
-  const pinnedSet = new Set(pinned);
-  const pinnedNotRendered = pinned.filter((uri) => !requested.includes(uri));
-  const ordered = [
-    ...pinned.filter((uri) => requested.includes(uri)),
-    ...requested.filter((uri) => !pinnedSet.has(uri)),
-  ];
 
   // Accept plain {start, end} time spans (e.g. from postMessage or JSON,
   // where BigInts arrive as strings) by normalizing to
@@ -170,10 +153,11 @@ async function renderTimelineImageAdapter(
 
   const output = await renderOffscreenTimeline({
     trace,
-    trackUris: ordered,
+    trackUris: opts.trackUris ?? [],
     trackNodes: defaultNodes,
     timeSpan,
     widthPx: opts.widthPx,
+    heightPx: opts.heightPx,
     aspectRatio: opts.aspectRatio,
     devicePixelRatio: opts.devicePixelRatio,
     dataResolutionScale: opts.dataResolutionScale,
@@ -181,61 +165,7 @@ async function renderTimelineImageAdapter(
     includeTrackShell: opts.includeTrackShell,
     includeTimeAxis: opts.includeTimeAxis,
   });
-  if (unmatchedNames.length > 0 && !output.warnings.includes('TRACK_MISSING')) {
-    output.warnings = [...output.warnings, 'TRACK_MISSING'];
-  }
-  // pinTracks entries outside the rendered set are skipped for layout but
-  // must be reported: a silent no-op hides caller mistakes (public API docs
-  // promise a TRACK_NOT_RENDERED warning for this case).
-  if (
-    pinnedNotRendered.length > 0 &&
-    !output.warnings.includes('TRACK_NOT_RENDERED')
-  ) {
-    output.warnings = [...output.warnings, 'TRACK_NOT_RENDERED'];
-  }
   return output;
-}
-
-/**
- * Resolve human-readable track selectors ({name, tid/pid}) against the
- * workspace. Workspace titles are "<name> <tid>" for threads and
- * "<name> <pid>" for processes, so an exact id match requires the id to
- * appear in the title; a bare name matches titles equal to the name or
- * starting with "<name> " (i.e. any thread with that name).
- */
-function resolveTrackNames(
-  trace: TraceImpl,
-  selectors: ReadonlyArray<{name: string; tid?: number; pid?: number}>,
-): {resolvedNameUris: string[]; unmatchedNames: string[]} {
-  const titles: {uri: string; name: string; headless: boolean}[] = [];
-  const walk = (n: TrackNode) => {
-    if (n.uri && n.name) {
-      titles.push({uri: n.uri, name: n.name, headless: n.headless});
-    }
-    for (const child of n.children) walk(child);
-  };
-  walk(trace.defaultWorkspace.tracks);
-  const resolvedNameUris: string[] = [];
-  const unmatchedNames: string[] = [];
-  for (const sel of selectors) {
-    const id = sel.tid ?? sel.pid;
-    const matches = titles.filter(({name}) =>
-      id === undefined
-        ? name === sel.name || name.startsWith(`${sel.name} `)
-        : name === `${sel.name} ${id}`,
-    );
-    if (matches.length === 0) {
-      unmatchedNames.push(id === undefined ? sel.name : `${sel.name} [${id}]`);
-    } else {
-      // A thread group (headless, e.g. "RenderThread 4543") and its child
-      // tracks share the same title; prefer the group node — the renderer
-      // expands it to the thread's actual tracks (state + slices).
-      const groups = matches.filter((m) => m.headless);
-      const chosen = groups.length > 0 ? groups : matches;
-      resolvedNameUris.push(...chosen.map((m) => m.uri));
-    }
-  }
-  return {resolvedNameUris, unmatchedNames};
 }
 
 /**

@@ -46,19 +46,26 @@ back-to-back and both succeed.
 
 ## Step 2: Pick the tracks and the time span
 
-A default snapshot of everything is rarely what a report needs. Two mutually
-supporting selectors are available:
+A default snapshot of everything is rarely what a report needs. Selection is
+inclusion-only, by workspace URI:
 
-- `trackUris`: exact workspace URIs, ordered top-to-bottom.
-- `trackNames`: human-readable names with optional `tid`/`pid`, e.g.
-  `{name: 'RenderThread', tid: 4543}`. Resolved URIs are appended to
-  `trackUris`; unmatched names produce a `TRACK_MISSING` warning on the
-  result rather than an error.
-
-`pinTracks` moves chosen tracks (which must be part of the rendered set) to
-the top of the image — the "pin to top" workflow from the interactive UI.
-`timeSpan` is `{start, end}` in nanoseconds, passed as strings so it
-survives JSON serialization.
+- `trackUris`: exact workspace URIs. **The list order is the render order,
+  top to bottom** — putting a URI first is how you pin it to the top.
+  URI shapes you will use most (spellings of the current built-in plugins;
+  the SQL tables are the stable contract):
+  - `/thread_<utid>`: every capability track of that thread (CPU state,
+    slices, and whatever else the trace provides for it);
+  - `/process_<upid>/thread_<utid>_state` (or `/thread_<utid>_state`
+    when the thread has no process): exactly the thread's CPU state track;
+  - `/slice_<trackId>`: exactly the thread's slice track.
+  The ids come from trace_processor, so a caller that knows a thread can
+  select precisely, e.g. `select utid, upid from thread where tid = 4543`,
+  then the `track`/`thread_track` tables for single capability tracks.
+  Unknown URIs reject the render with an error listing them.
+- Not sure which URIs the trace has? Ask the UI with a `listTracks`
+  message: it returns the live workspace tree (`uri`, `name`, display
+  `path`, `isGroup`) — the same rows the interactive UI shows. The batch
+  flow is load trace -> `listTracks` -> filter caller-side -> render.
 
 The classic jank-report recipe:
 
@@ -69,9 +76,9 @@ iframe.contentWindow.postMessage(
         action: 'renderTimelineImage',
         id: 'jank-1',
         options: {
-          trackUris: ['/sched_cpu0', '/cpu_freq_cpu0'],
-          trackNames: [{name: 'RenderThread', tid: 4543}, {name: 'sf'}],
-          pinTracks: ['/sched_cpu0'],
+          // Order = top-to-bottom render order; /thread_<utid> expands to
+          // the thread's capability tracks.
+          trackUris: ['/sched_cpu0', '/thread_7303', '/cpu_freq_cpu0'],
           timeSpan: {start: '3428202643641', end: '3428410622726'},
           aspectRatio: 4 / 3,
         },
@@ -80,10 +87,20 @@ iframe.contentWindow.postMessage(
     '*');
 ```
 
-Width can be given directly (`widthPx`) or derived from the track set's
-height via `aspectRatio` — the two are mutually exclusive. Height is always
-derived from the tracks: the image is exactly as tall as the requested track
-stack.
+Image size, with defaults:
+
+- `widthPx`: the width in CSS pixels. Default **1920**.
+- `heightPx`: optional exact canvas height. The track content has a natural
+  height (time axis + track stack); a larger `heightPx` pads the remainder
+  with background (fixed-size report grids), a smaller one clips the content
+  and reports a `TRUNCATED` warning. Default: the image is exactly as tall
+  as the content (the zero-config default composition is capped at 2160 px
+  instead).
+- `aspectRatio`: derives the width from the canvas height (e.g. `4/3`),
+  for when the exact pixel height is not known in advance. Mutually
+  exclusive with `widthPx`.
+
+So a fixed 1080x1920 report cell is `{widthPx: 1080, heightPx: 1920}`.
 
 ## Step 3: Receive the result
 
@@ -120,8 +137,7 @@ metadata: dimensions, effective `devicePixelRatio`, per-track bounding boxes
 
 | Symptom | Meaning |
 | --- | --- |
-| `TRUNCATED` warning | The default (no `trackUris`/`trackNames`) composition exceeded the 2160px height cap. Request an explicit track set. |
-| `TRACK_MISSING` warning | A `trackNames` entry matched nothing. Check the exact name and `tid`/`pid`. |
-| `TRACK_NOT_RENDERED` warning | A `pinTracks` entry is not part of the rendered set. Add it to `trackUris`/`trackNames` too. |
+| `TRUNCATED` warning | The default (no `trackUris`) composition exceeded the 2160px height cap. Request an explicit track set. |
+| Render error `unknown track uris` | A URI in `trackUris` matched nothing in the workspace. Check the URI (ids come from trace_processor tables). |
 | `TIMELINE_UNAVAILABLE` warning | The timeline plugin did not register a renderer (no trace loaded, or load failed). |
 | `error: 'render queue full'` | More than 32 requests queued while one was running. Render less concurrently. |

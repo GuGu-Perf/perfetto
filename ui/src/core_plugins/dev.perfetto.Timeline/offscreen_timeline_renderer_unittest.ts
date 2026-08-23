@@ -118,6 +118,19 @@ test('oversized canvas is rejected before any canvas is created', async () => {
   ).rejects.toThrow('too large');
 });
 
+test('heightPx < 1 is rejected', async () => {
+  const trace = createFakeTraceImpl();
+  await expect(
+    renderOffscreenTimeline({
+      trace,
+      trackUris: [],
+      timeSpan: span(0n, 1_000n),
+      widthPx: 100,
+      heightPx: 0,
+    }),
+  ).rejects.toThrow('heightPx must be >= 1');
+});
+
 test('widthPx < 1 is rejected', async () => {
   const trace = createFakeTraceImpl();
   trace.tracks.registerTrack({

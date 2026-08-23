@@ -68,11 +68,11 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
     await helper.page.close();
   });
 
-  test('anchor window renders non-empty with the anchor thread resolvable by name', async () => {
+  test('anchor window renders non-empty with the anchor thread by utid', async () => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const r = await trace.timelineImage.renderTimelineImage({
-        trackNames: [{name: 'RenderThread', tid: 4543}],
+        trackUris: ['/thread_2'],
         timeSpan: {start: win.start, end: win.end},
         widthPx: 1200,
         devicePixelRatio: 1,
@@ -137,7 +137,7 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
     const hashes = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const opts = {
-        trackNames: [{name: 'RenderThread', tid: 4543}],
+        trackUris: ['/thread_2'],
         timeSpan: {start: win.start, end: win.end},
         widthPx: 1200,
         devicePixelRatio: 1,

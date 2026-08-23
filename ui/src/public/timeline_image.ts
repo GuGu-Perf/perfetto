@@ -23,28 +23,36 @@ import type {time} from '../base/time';
  */
 export interface TimelineImageOptions {
   /**
-   * Ordered list of track URIs to render, top to bottom. Defaults to all
-   * tracks in the current workspace.
+   * Ordered list of track URIs to render, top to bottom — the list order is
+   * the render order, so "pinning" is just putting a uri first. Defaults to
+   * all tracks in the current workspace.
+   *
+   * URI shapes of interest (as built by the current built-in plugins; the
+   * SQL tables are the stable contract, the URI spellings are not):
+   * - `/thread_<utid>`: every capability track of that thread (state,
+   *   slices, and anything else the trace provides). Obtain the utid via
+   *   `select utid from thread where tid = <tid>`.
+   * - `/process_<upid>/thread_<utid>_state` (or `/thread_<utid>_state` for
+   *   threads without a process): exactly the thread's CPU state track; the
+   *   upid comes from the same query (`select utid, upid from thread ...`).
+   * - `/slice_<trackId>`: exactly the thread's slice track; the id comes
+   *   from `select t.id from track t join thread_track tt on t.id = tt.id
+   *   where tt.utid = <utid>`.
+   * Alternatively, discover URIs at runtime with the `listTracks` embedding
+   * message, which returns the live workspace tree.
+   * Unmatched URIs reject the render with an error listing them.
    */
   readonly trackUris?: readonly string[];
   /**
-   * Resolve tracks by human-readable name (and optional thread/process id),
-   * e.g. {name: 'RenderThread', tid: 4543}. Matches workspace tracks whose
-   * title equals `name`, or `"<name> <tid>"` when tid is given. Resolved
-   * URIs are appended to `trackUris` (deduplicated); unmatched entries
-   * produce a TRACK_MISSING warning.
+   * Exact canvas height in CSS pixels. The track content has a natural
+   * height (time axis + track stack); when `heightPx` exceeds it the
+   * remainder is background padding (useful for fixed-size report grids),
+   * when it is smaller the content is clipped and the result carries a
+   * `TRUNCATED` warning. Default: the canvas is exactly as tall as the
+   * content (the zero-config default composition is capped at 2160 CSS px
+   * instead).
    */
-  readonly trackNames?: readonly {
-    readonly name: string;
-    readonly tid?: number;
-    readonly pid?: number;
-  }[];
-  /**
-   * Subset of tracks to pin to the top of the image, in order. Each entry
-   * must also be part of the rendered set (explicitly or via the default);
-   * entries which are not renderable produce a TRACK_NOT_RENDERED warning.
-   */
-  readonly pinTracks?: readonly string[];
+  readonly heightPx?: number;
   /**
    * Time span to render, as {start, end} in nanoseconds. Defaults to the
    * current visible window. Strings are accepted and parsed as BigInt, so
@@ -57,14 +65,14 @@ export interface TimelineImageOptions {
   };
   /**
    * Width of the produced image in CSS pixels. Mutually exclusive with
-   * `aspectRatio` (they constrain the same degree of freedom: the height is
-   * always derived from the track set). Default: 1920 when neither is given.
+   * `aspectRatio` (they constrain the same degree of freedom: the width).
+   * Default: 1920 when neither is given.
    */
   readonly widthPx?: number;
   /**
-   * Target width/height ratio of the produced image (e.g. 4/3). The height
-   * is determined by the track set, so the width becomes
-   * round(height * aspectRatio). Mutually exclusive with `widthPx`.
+   * Target width/height ratio of the produced image (e.g. 4/3). The canvas
+   * height (track content, or `heightPx` when given) determines the width:
+   * `round(height * aspectRatio)`. Mutually exclusive with `widthPx`.
    */
   readonly aspectRatio?: number;
   /** Device pixel ratio of the canvas (image crispness). Default: 2. */
@@ -101,8 +109,6 @@ export interface TimelineImageOptions {
 /** Warning kinds reported on a completed TimelineImageResult. */
 export type TimelineImageWarning =
   | 'TIMELINE_UNAVAILABLE'
-  | 'TRACK_MISSING'
-  | 'TRACK_NOT_RENDERED'
   | 'TIMEOUT'
   // The zero-config default composition was truncated at the default
   // height cap (2160 CSS px); request explicit trackUris for everything.

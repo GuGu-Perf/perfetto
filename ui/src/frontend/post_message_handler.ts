@@ -22,6 +22,7 @@ import type {SerializedAppState} from '../core/state_serialization_schema';
 import {parseAppState} from '../core/state_serialization';
 import {BUCKET_NAME, isValidGcsFileName} from '../base/gcs_uploader';
 import {toArrayBuffer} from '../base/utils';
+import type {TrackNode} from '../public/workspace';
 
 const TRUSTED_ORIGINS_KEY = 'trustedOrigins';
 
@@ -83,6 +84,19 @@ interface PostedRenderTimelineImage {
 
 interface PostedRenderTimelineImageWrapped {
   perfetto: PostedRenderTimelineImage;
+}
+
+// Discover the workspace track tree (see the embedding API docs): the
+// mapping from what the UI shows (threads, groups, per-CPU tracks) to the
+// URIs renderTimelineImage selects by. Read-only; held until a trace is
+// loaded like render requests.
+interface PostedListTracks {
+  action: 'listTracks';
+  id: string;
+}
+
+interface PostedListTracksWrapped {
+  perfetto: PostedListTracks;
 }
 
 // One render at a time; further requests wait in a bounded queue.
@@ -254,6 +268,16 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   }
 
   let postedScrollToRange: PostedScrollToRange;
+  if (isPostedListTracks(messageEvent.data)) {
+    const windowSource = messageEvent.source as Window;
+    const targetOrigin =
+      messageEvent.origin === 'null' ? '*' : messageEvent.origin;
+    runListTracks(messageEvent.data.perfetto, (payload) => {
+      windowSource.postMessage({perfetto: payload}, targetOrigin);
+    });
+    return;
+  }
+
   if (isPostedScrollToRange(messageEvent.data)) {
     postedScrollToRange = messageEvent.data.perfetto;
     scrollToTimeRange(postedScrollToRange);
@@ -497,6 +521,55 @@ async function runRenderTimelineImage(
       error: e instanceof Error ? e.message : String(e),
     });
   }
+}
+
+// Flattens the workspace track tree for the listTracks reply: every node
+// the interactive tree shows, with the URI renderTimelineImage selects by
+// (grouping nodes may be URI-less) and the display path for matching
+// against what the user sees in the UI.
+async function runListTracks(
+  req: PostedListTracks,
+  reply: (payload: Record<string, unknown>) => void,
+): Promise<void> {
+  try {
+    const deadline = performance.now() + 60_000;
+    let trace = AppImpl.instance.trace;
+    while (trace === undefined && performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      trace = AppImpl.instance.trace;
+    }
+    if (trace === undefined) {
+      reply({
+        action: 'listTracksResult',
+        id: req.id,
+        error: 'no trace loaded within 60s of the listTracks request',
+      });
+      return;
+    }
+    const tracks: Record<string, unknown>[] = [];
+    const visit = (node: TrackNode) => {
+      tracks.push({
+        uri: node.uri ?? null,
+        name: node.name ?? '',
+        path: node.fullPath.join(' \u203a '),
+        isGroup: node.hasChildren || node.headless || node.isSummary,
+      });
+      node.children.forEach(visit);
+    };
+    trace.defaultWorkspace.tracks.children.forEach(visit);
+    reply({action: 'listTracksResult', id: req.id, tracks});
+  } catch (e) {
+    reply({
+      action: 'listTracksResult',
+      id: req.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+function isPostedListTracks(obj: unknown): obj is PostedListTracksWrapped {
+  const wrapped = obj as PostedListTracksWrapped;
+  return wrapped.perfetto?.action === 'listTracks';
 }
 
 function isPostedScrollToRange(
