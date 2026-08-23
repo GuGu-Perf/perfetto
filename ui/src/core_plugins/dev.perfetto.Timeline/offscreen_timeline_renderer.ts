@@ -173,7 +173,13 @@ export async function renderOffscreenTimeline(
     devicePixelRatio = 2,
     dataResolutionScale = 0.5,
     perTrackTimeoutMs = 5_000,
-    maxRounds = 3,
+    // 8, not 3: data-dependent query chains occasionally need more than
+    // three warm-up/draw rounds to converge; a premature cutoff leaves two
+    // calls in different converged states (observed as a slice label
+    // present in one output and absent in the other). The stability probe
+    // still exits early once two rounds agree, so healthy renders stay at
+    // 2-3 rounds; this ceiling only protects the fixed point.
+    maxRounds = 8,
     includeTrackShell = true,
     includeTimeAxis = true,
     trackNodes,
