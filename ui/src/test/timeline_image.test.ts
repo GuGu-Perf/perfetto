@@ -450,12 +450,17 @@ test.describe.serial('timeline image rendering', () => {
         .map((e) => {
           const b = e.getBoundingClientRect();
           return {
-            name: (e.querySelector('.pf-track__title')?.textContent ?? '').trim(),
+            name: (
+              e.querySelector('.pf-track__title')?.textContent ?? ''
+            ).trim(),
             top: b.y - clipY,
             height: b.height,
           };
         })
-        .filter((x) => x.name.length > 0 && x.height > 0 && x.top >= -2 && x.top < 620)
+        .filter(
+          (x) =>
+            x.name.length > 0 && x.height > 0 && x.top >= -2 && x.top < 620,
+        )
         .slice(0, 12);
       // API bands exclude the 22px time-axis row from this comparison.
       const bands = r.trackBoxes
@@ -466,8 +471,12 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.rows.length).toBeGreaterThanOrEqual(6);
     for (let i = 0; i < result.rows.length; i++) {
       expect(result.bands[i].name).toBe(result.rows[i].name);
-      expect(Math.abs(result.bands[i].top - result.rows[i].top)).toBeLessThanOrEqual(1);
-      expect(Math.abs(result.bands[i].height - result.rows[i].height)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(result.bands[i].top - result.rows[i].top),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(result.bands[i].height - result.rows[i].height),
+      ).toBeLessThanOrEqual(1);
     }
   });
 
