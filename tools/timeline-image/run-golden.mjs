@@ -11,7 +11,8 @@ import {writeFileSync, mkdirSync, readFileSync} from 'fs';
 import {execSync} from 'child_process';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
-const TRACE = ROOT + 'test/data/smartperfetto_android_scroll_jank_customer.pftrace';
+const JANK_TRACE = ROOT + 'test/data/smartperfetto_android_scroll_jank_customer.pftrace';
+const EXAMPLE_TRACE = ROOT + 'test/data/example_android_trace.pftrace';
 
 // Frozen golden scenarios. G-STD is the user-approved standard working set
 // (step2 parameters); G-DEFAULT is the zero-argument API semantics (the
@@ -33,6 +34,31 @@ const SCENARIOS = {
     description: 'Zero-argument API default: the whole default workspace in UI order',
     opts: {widthPx: 1800, devicePixelRatio: 1, perTrackTimeoutMs: 30000},
     uiRefClip: {x: 230, y: 114, width: 1690, height: 340},
+  },
+  // User-authored case (v9.14): example trace, window spanned by
+  // slice[95635] (dispatchFrameCallbacks) .. slice[115701] (DrawFrames),
+  // both on RenderThread tid 4543 (utid 75); RenderThread pinned first;
+  // standard mode = all cpus' freq + sched groups in UI order; landscape
+  // 4:3 (width = height * 4/3; the API derives height from tracks, so the
+  // ratio is realized by solving for widthPx).
+  'G-E1': {
+    trace: EXAMPLE_TRACE,
+    workspaceMarker: '/thread_75',
+    aspectRatio: 4 / 3,
+    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 pinned, standard mode, 4:3',
+    opts: {
+      trackUris: ['/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
+                  '/cpu_freq_cpu4','/cpu_freq_cpu5','/cpu_freq_cpu6','/cpu_freq_cpu7',
+                  '/cpu_freq_cpu8',
+                  '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3',
+                  '/sched_cpu4','/sched_cpu5','/sched_cpu6','/sched_cpu7',
+                  '/sched_cpu8',
+                  '/thread_75'],
+      pinTracks: ['/thread_75'],
+      timeSpan: {start: '3428202643641', end: '3428410622726'},
+      devicePixelRatio: 1, perTrackTimeoutMs: 20000,
+    },
+    uiRefClip: {x: 230, y: 114, width: 1690, height: 300},
   },
 };
 
@@ -64,12 +90,12 @@ async function main() {
   page.on('console', (m) => log.push(m.text()));
   await page.goto('http://127.0.0.1:10000/?testing=1');
   const input = await page.waitForSelector('input.trace_file', {state: 'attached', timeout: 30000});
-  await input.setInputFiles(TRACE);
-  await page.waitForFunction(() => {
+  await input.setInputFiles(scenario.trace ?? JANK_TRACE);
+  await page.waitForFunction((markerUri) => {
     if (!(window.ctx && window.ctx.traceInfo)) return false;
-    const walk = (n) => { if (n.uri === '/thread_7303') return true; for (const c of n.children) if (walk(c)) return true; return false; };
+    const walk = (n) => { if (n.uri === markerUri) return true; for (const c of n.children) if (walk(c)) return true; return false; };
     return walk(window.ctx.defaultWorkspace.tracks);
-  }, null, {timeout: 120000});
+  }, scenario.workspaceMarker ?? '/thread_7303', {timeout: 120000});
   log.push(`workspace ready at ${Date.now() - t0}ms`);
   // Safety net: dismiss any modal (should not appear with an empty daemon).
   const modalCount = await page.evaluate(() => {
@@ -84,6 +110,16 @@ async function main() {
   const uiPng = await page.screenshot({clip: scenario.uiRefClip});
   writeFileSync(`${out}/ui-reference.png`, uiPng);
 
+  let evalOpts = {...scenario.opts};
+  if (scenario.aspectRatio) {
+    // Pass 1: measure the track-derived height (width does not affect it).
+    const probe = await page.evaluate(async (opts) => {
+      const r = await window.ctx.timelineImage.renderTimelineImage({...opts, widthPx: 800});
+      return r.height;
+    }, evalOpts);
+    evalOpts.widthPx = Math.round(probe * scenario.aspectRatio);
+    log.push(`aspect ${scenario.aspectRatio}: height=${probe} -> widthPx=${evalOpts.widthPx}`);
+  }
   const result = await page.evaluate(async (opts) => {
     const r = await window.ctx.timelineImage.renderTimelineImage(opts);
     const ab = await r.blob.arrayBuffer();
@@ -92,7 +128,7 @@ async function main() {
     for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
     return {b64: btoa(bin), width: r.width, height: r.height, warnings: r.warnings,
       perf: r.perf, tracks: r.trackBoxes.map((b) => ({name: b.name, uri: b.uri, h: b.height, depth: b.depth, group: b.isGroupHeader || false}))};
-  }, scenario.opts);
+  }, evalOpts);
   writeFileSync(`${out}/golden.png`, Buffer.from(result.b64, 'base64'));
   const engine = log.find((l) => l.includes('Opening trace using native accelerator')) ? 'native' : 'wasm';
   writeFileSync(`${out}/engine.txt`, engine);
@@ -103,7 +139,7 @@ async function main() {
   }, null, 1));
   writeFileSync(`${out}/run.json`, JSON.stringify({
     scenario: scenarioName, startedAt: ts, wallMs: Date.now() - t0, engine,
-    trace: TRACE.split('/').pop(), modalsDismissed: modalCount,
+    trace: (scenario.trace ?? JANK_TRACE).split('/').pop(), modalsDismissed: modalCount,
   }, null, 1));
   writeFileSync(`${out}/run.log`, log.join('\n'));
   // ---- baseline discipline (plan v9.13): expectations are frozen files.
