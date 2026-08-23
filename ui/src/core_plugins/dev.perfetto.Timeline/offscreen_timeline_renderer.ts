@@ -58,6 +58,11 @@ import {
 const MAX_CANVAS_EDGE_PX = 16384;
 const MAX_CANVAS_AREA_PX = 32_000_000;
 
+// Warm-up budget for fixed-point rounds after the first: later rounds only
+// wait for second-order queries, so a small cap keeps the worst case within
+// the "one minute per image" service budget (plan §1.4).
+const SECOND_ROUND_BUDGET_MS = 5_000;
+
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
   // Ordered list of track URIs to render, top to bottom.
@@ -121,20 +126,25 @@ export async function renderOffscreenTimeline(
   const missingTracks: string[] = [];
   let top = 0;
   for (const uri of trackUris) {
-    const node = resolveTrackNode(trace, uri);
-    if (!node) {
+    // Headless nodes are grouping containers (e.g. a thread node holding its
+    // slice & state tracks); expand them so the requested tracks actually
+    // render instead of collapsing to zero height.
+    const nodes = resolveRenderableTrackNodes(trace, uri);
+    if (nodes.length === 0) {
       missingTracks.push(uri);
       continue;
     }
-    const view = new TrackView(trace, node, top, false);
-    trackViews.push(view);
-    trackBoxes.push({
-      uri,
-      name: node.name,
-      top,
-      height: view.height,
-    });
-    top += view.height;
+    for (const node of nodes) {
+      const view = new TrackView(trace, node, top, false);
+      trackViews.push(view);
+      trackBoxes.push({
+        uri: node.uri ?? uri,
+        name: node.name,
+        top,
+        height: view.height,
+      });
+      top += view.height;
+    }
   }
   if (trackViews.length === 0) {
     throw new Error(
@@ -221,27 +231,28 @@ export async function renderOffscreenTimeline(
     });
   }
 
-  const warmUp = async () => {
-    let allSettledInstantly = true;
-    for (const view of trackViews) {
-      const renderCtx = renderContexts.get(view);
-      const trackRenderer = view.renderer?.track;
-      if (!renderCtx || !view.node.uri || !trackRenderer?.whenDataReady) {
-        continue;
-      }
-      const ready = withTimeout(
-        trackRenderer.whenDataReady(renderCtx),
-        perTrackTimeoutMs,
-      );
-      const settled = await ready;
-      if (!settled) {
-        allSettledInstantly = false;
-        if (!timedOutTracks.includes(view.node.uri)) {
+  const warmUp = async (budgetMs: number) => {
+    // Wait for all tracks concurrently: total wall-clock is bounded by the
+    // per-track budget, not by the sum over tracks. The underlying
+    // AtomicTaskQueue still executes queries one at a time.
+    const settledPerTrack = await Promise.all(
+      trackViews.map(async (view) => {
+        const renderCtx = renderContexts.get(view);
+        const trackRenderer = view.renderer?.track;
+        if (!renderCtx || !view.node.uri || !trackRenderer?.whenDataReady) {
+          return true;
+        }
+        const settled = await withTimeout(
+          trackRenderer.whenDataReady(renderCtx),
+          budgetMs,
+        );
+        if (!settled && !timedOutTracks.includes(view.node.uri)) {
           timedOutTracks.push(view.node.uri);
         }
-      }
-    }
-    return allSettledInstantly;
+        return settled;
+      }),
+    );
+    return settledPerTrack.every((settled) => settled);
   };
 
   // Warm-up/draw fixed point. Two termination hazards are handled by
@@ -261,9 +272,16 @@ export async function renderOffscreenTimeline(
   try {
     for (;;) {
       const loadStart = performance.now();
-      await traceEvent('TimelineImage.warmUp', () => warmUp(), {
-        args: {round: String(rounds)},
-      });
+      // Round 0 gets the full per-track budget; later rounds only wait for
+      // data-dependent second-order queries to settle, which are cheap.
+      const budget = rounds === 0 ? perTrackTimeoutMs : SECOND_ROUND_BUDGET_MS;
+      await traceEvent(
+        'TimelineImage.warmUp',
+        () => warmUp(budget),
+        {
+          args: {round: String(rounds)},
+        },
+      );
       loadMs += performance.now() - loadStart;
       const drawStart = performance.now();
       traceEvent('TimelineImage.draw', () => draw(), {
@@ -394,6 +412,32 @@ function resolveTrackNode(
     return new TrackNode({uri, name: uri});
   }
   return undefined;
+}
+
+/**
+ * Resolve a requested URI to the list of nodes that should actually be
+ * rendered: headless grouping nodes are expanded to their renderable
+ * (non-headless) descendants, in tree order.
+ */
+function resolveRenderableTrackNodes(
+  trace: TraceImpl,
+  uri: string,
+): TrackNode[] {
+  const node = resolveTrackNode(trace, uri);
+  if (!node) return [];
+  if (!node.headless) return [node];
+  const descendants: TrackNode[] = [];
+  const collect = (n: TrackNode) => {
+    for (const child of n.children) {
+      if (child.headless) {
+        collect(child);
+      } else {
+        descendants.push(child);
+      }
+    }
+  };
+  collect(node);
+  return descendants;
 }
 
 function findNodeByUri(node: TrackNode, uri: string): TrackNode | undefined {

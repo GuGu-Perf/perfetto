@@ -26,9 +26,11 @@ import {
   TASK_CANCELLED,
   AsyncMemo,
   AtomicTaskQueue,
+  type AsyncMemoOptions,
 } from '../../base/async_memo';
 import type {StepAreaBuffers} from '../../base/renderer';
-import {type duration, type time, Time} from '../../base/time';
+import {type duration, type time, type TimeSpan, Time} from '../../base/time';
+import type {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
 import type {TimeScale} from '../../base/time_scale';
 import {checkerboardExcept} from '../../components/checkerboard';
 import {colorForCpu} from '../../components/colorizer';
@@ -364,6 +366,89 @@ export class CpuFreqTrack implements TrackRenderer {
     return MARGIN_TOP + RECT_HEIGHT;
   }
 
+  /**
+   * The bounds used for data queries. When the render context provides an
+   * explicit `queryBounds` (offscreen rendering), use it exactly; otherwise
+   * derive buffered bounds around the visible window as usual.
+   */
+  private computeDataBounds(trackCtx: {
+    visibleWindow: HighPrecisionTimeSpan;
+    resolution: duration;
+    queryBounds?: TimeSpan;
+  }): {
+    start: time;
+    end: time;
+    resolution: duration;
+  } {
+    if (trackCtx.queryBounds) {
+      return {
+        start: trackCtx.queryBounds.start,
+        end: trackCtx.queryBounds.end,
+        resolution: trackCtx.resolution,
+      };
+    }
+    const visibleSpan = trackCtx.visibleWindow.toTimeSpan();
+    return this.bufferedBounds.update(visibleSpan, trackCtx.resolution);
+  }
+
+  private tableSlotOptions(): AsyncMemoOptions<
+    MipmapTables,
+    {freqTrackId: number; idleTrackId: number | undefined}
+  > {
+    return {
+      // Key is constant - tables only need to be created once
+      key: {
+        freqTrackId: this.config.freqTrackId,
+        idleTrackId: this.config.idleTrackId,
+      },
+      compute: () => this.createMipmapTables(),
+    };
+  }
+
+  private dataSlotOptions(
+    tables: MipmapTables,
+    bounds: {start: time; end: time; resolution: duration},
+  ): AsyncMemoOptions<
+    Data,
+    {start: time; end: time; resolution: duration}
+  > {
+    return {
+      key: {
+        start: bounds.start,
+        end: bounds.end,
+        resolution: bounds.resolution,
+      },
+      compute: async (signal: CancellationSignal) => {
+        const result = await this.trace.taskTracker.track(
+          this.fetchData(
+            tables.freqTableName,
+            tables.idleTableName,
+            bounds.start,
+            bounds.end,
+            bounds.resolution,
+            signal,
+          ),
+          'Loading CPU freq',
+        );
+        this.trace.raf.scheduleCanvasRedraw();
+        return result;
+      },
+      retainOn: ['start', 'end', 'resolution'],
+    };
+  }
+
+  async whenDataReady(trackCtx: TrackRenderContext): Promise<void> {
+    const tableOpts = this.tableSlotOptions();
+    const tableResult = this.tableSlot.use(tableOpts);
+    if (tableResult.data === undefined) {
+      await this.tableSlot.waitFor(tableOpts);
+    }
+    const tables = this.tableSlot.use(tableOpts).data;
+    if (tables === undefined) return;
+    const bounds = this.computeDataBounds(trackCtx);
+    await this.dataSlot.waitFor(this.dataSlotOptions(tables, bounds));
+  }
+
   renderTooltip(): m.Children {
     if (this.hover === undefined) {
       return undefined;
@@ -388,44 +473,21 @@ export class CpuFreqTrack implements TrackRenderer {
     renderer,
     visibleWindow,
     resolution,
+    queryBounds,
   }: TrackRenderContext): void {
     // Step 1: Declaratively ensure mipmap tables exist
-    const tableResult = this.tableSlot.use({
-      // Key is constant - tables only need to be created once
-      key: {
-        freqTrackId: this.config.freqTrackId,
-        idleTrackId: this.config.idleTrackId,
-      },
-      compute: () => this.createMipmapTables(),
-    });
+    const tableResult = this.tableSlot.use(this.tableSlotOptions());
 
     // Step 2: Declaratively fetch data from the tables with buffered bounds
-    const visibleSpan = visibleWindow.toTimeSpan();
-    const bounds = this.bufferedBounds.update(visibleSpan, resolution);
+    const bounds = this.computeDataBounds({
+      visibleWindow,
+      resolution,
+      queryBounds,
+    });
 
     // Use the stable loaded bounds as the key - only changes when we decide to refetch
     const dataResult = this.dataSlot.use({
-      key: {
-        start: bounds.start,
-        end: bounds.end,
-        resolution: bounds.resolution,
-      },
-      compute: async (signal) => {
-        const result = await this.trace.taskTracker.track(
-          this.fetchData(
-            tableResult.data!.freqTableName,
-            tableResult.data!.idleTableName,
-            bounds.start,
-            bounds.end,
-            bounds.resolution,
-            signal,
-          ),
-          'Loading CPU freq',
-        );
-        this.trace.raf.scheduleCanvasRedraw();
-        return result;
-      },
-      retainOn: ['start', 'end', 'resolution'],
+      ...this.dataSlotOptions(tableResult.data!, bounds),
       enabled: tableResult.data !== undefined,
     });
 

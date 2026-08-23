@@ -35,9 +35,14 @@ export interface TimelineImageOptions {
   readonly pinTracks?: readonly string[];
   /**
    * Time span to render, as {start, end} in nanoseconds. Defaults to the
-   * current visible window.
+   * current visible window. Strings are accepted and parsed as BigInt, so
+   * callers crossing a JSON boundary (e.g. postMessage) can pass timestamps
+   * serialized as strings.
    */
-  readonly timeSpan?: {readonly start: time; readonly end: time};
+  readonly timeSpan?: {
+    readonly start: time | string;
+    readonly end: time | string;
+  };
   /** Width of the produced image in CSS pixels. Default: 1920. */
   readonly widthPx?: number;
   /** Device pixel ratio of the canvas. Default: 2. */

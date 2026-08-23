@@ -21,6 +21,8 @@ import type {PerfettoPlugin} from '../../public/plugin';
 import {TimelinePage} from './timeline_page';
 import {renderOffscreenTimeline} from './offscreen_timeline_renderer';
 import {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
+import type {time} from '../../base/time';
+import {Time} from '../../base/time';
 import type {TimelineImageOptions} from '../../public/timeline_image';
 import type {TimelineImageRenderOutput} from '../../core/timeline_image_manager';
 import type {TrackNode} from '../../public/workspace';
@@ -97,10 +99,16 @@ async function renderTimelineImageAdapter(
     ...requested.filter((uri) => !pinnedSet.has(uri)),
   ];
 
-  // Accept plain {start, end} time spans (e.g. from postMessage) by
-  // normalizing to HighPrecisionTimeSpan; default to the visible window.
+  // Accept plain {start, end} time spans (e.g. from postMessage or JSON,
+  // where BigInts arrive as strings) by normalizing to
+  // HighPrecisionTimeSpan; default to the visible window.
+  const toTime = (t: time | string): time =>
+    typeof t === 'string' ? Time.fromRaw(BigInt(t)) : t;
   const timeSpan = opts.timeSpan
-    ? HighPrecisionTimeSpan.fromTime(opts.timeSpan.start, opts.timeSpan.end)
+    ? HighPrecisionTimeSpan.fromTime(
+        toTime(opts.timeSpan.start),
+        toTime(opts.timeSpan.end),
+      )
     : trace.timeline.visibleWindow;
 
   const output = await renderOffscreenTimeline({
@@ -117,7 +125,14 @@ async function renderTimelineImageAdapter(
 
 function collectLeafTrackUris(node: TrackNode): string[] {
   const uris: string[] = [];
-  if (node.uri) {
+  // Default collection mirrors what the UI shows after loading: a collapsed
+  // summary group contributes only its own (summary) track, and headless
+  // grouping containers are skipped entirely (they have no renderer).
+  if (node.isSummary && !node.expanded) {
+    if (node.uri && !node.headless) uris.push(node.uri);
+    return uris;
+  }
+  if (node.uri && !node.headless) {
     uris.push(node.uri);
   }
   for (const child of node.children) {
