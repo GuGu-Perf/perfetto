@@ -27,14 +27,9 @@ const SCENARIOS = {
                   '/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
                   '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3'],
       timeSpan: A2_WINDOW,
-      widthPx: 1800, devicePixelRatio: 1, perTrackTimeoutMs: 20000,
+      widthPx: 1800, devicePixelRatio: 1,
     },
     uiRefClip: {x: 230, y: 114, width: 1690, height: 256},
-  },
-  'G-DEFAULT': {
-    description: 'Zero-argument API default: the whole default workspace in UI order',
-    opts: {widthPx: 1800, devicePixelRatio: 1, perTrackTimeoutMs: 30000},
-    uiRefClip: {x: 230, y: 114, width: 1690, height: 340},
   },
   // User-authored case (v9.14): example trace, window spanned by
   // slice[95635] (dispatchFrameCallbacks) .. slice[115701] (DrawFrames),
@@ -45,7 +40,7 @@ const SCENARIOS = {
   'G-E1': {
     trace: EXAMPLE_TRACE,
     workspaceMarker: '/thread_75',
-    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 pinned, standard mode, 4:3 (uri-first list order + aspectRatio)',
+    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 first, standard mode, 4:3 (two-pass width derivation)',
     opts: {
       // List order = render order; RenderThread (utid 75) first = "pinned".
       trackUris: ['/thread_75',
@@ -56,8 +51,7 @@ const SCENARIOS = {
                   '/sched_cpu4','/sched_cpu5','/sched_cpu6','/sched_cpu7',
                   '/sched_cpu8'],
       timeSpan: {start: '3428202643641', end: '3428410622726'},
-      aspectRatio: 4 / 3,
-      devicePixelRatio: 1, perTrackTimeoutMs: 20000,
+      devicePixelRatio: 1, aspect: 4 / 3,
     },
     uiRefClip: {x: 230, y: 114, width: 1690, height: 300},
   },
@@ -113,6 +107,22 @@ async function main() {
 
   const evalOpts = {...scenario.opts};
   const result = await page.evaluate(async (opts) => {
+    if (opts.aspect === 4 / 3) {
+      // Two-pass width derivation (aspectRatio is not an API param):
+      // height is width-independent, so render once, then solve width.
+      const {aspect, ...rest} = opts;
+      const probe = await window.ctx.timelineImage.renderTimelineImage(rest);
+      rest.widthPx = Math.round(probe.height * aspect);
+      const final = await window.ctx.timelineImage.renderTimelineImage(rest);
+      void probe;
+      const r = final;
+      const ab = await r.blob.arrayBuffer();
+      const u8 = new Uint8Array(ab);
+      let bin = '';
+      for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+      return {b64: btoa(bin), width: r.width, height: r.height, warnings: r.warnings,
+        perf: r.perf, tracks: r.trackBoxes.map((b) => ({name: b.name, uri: b.uri, h: b.height, depth: b.depth, group: b.isGroupHeader || false}))};
+    }
     const r = await window.ctx.timelineImage.renderTimelineImage(opts);
     const ab = await r.blob.arrayBuffer();
     const u8 = new Uint8Array(ab);

@@ -130,7 +130,6 @@ test.describe.serial('timeline image rendering', () => {
         trackUris: ['/sched_cpu2', '/sched_cpu0', '/sched_cpu1', '/sched_cpu3'],
         timeSpan,
         widthPx: 1000,
-        perTrackTimeoutMs: 20_000,
       });
       const buf = new Uint8Array(await r.blob.arrayBuffer());
       const pngMagic =
@@ -201,7 +200,6 @@ test.describe.serial('timeline image rendering', () => {
         trackUris: ['/sched_cpu0', '/sched_cpu1'],
         timeSpan,
         widthPx: 800,
-        perTrackTimeoutMs: 20_000,
       });
       const bmp = await createImageBitmap(r.blob);
       const canvas = document.createElement('canvas');
@@ -230,7 +228,6 @@ test.describe.serial('timeline image rendering', () => {
         trackUris: ['/sched_cpu0', '/sched_cpu1'],
         timeSpan,
         widthPx: 800,
-        perTrackTimeoutMs: 20_000,
       };
       const a = await trace.timelineImage.renderTimelineImage(opts);
       const b = await trace.timelineImage.renderTimelineImage(opts);
@@ -254,9 +251,11 @@ test.describe.serial('timeline image rendering', () => {
         }
       };
       walk(trace.defaultWorkspace.tracks);
-      const frameTrack = uris.find(
-        (uri) => uri.includes('Actual Timeline') || uri.includes('frame'),
-      );
+      // Prefer the ACTUAL frame track: the boundary-spanning 62.7ms frame
+      // lives there; the expected-frames track can be empty at this edge.
+      const frameTrack =
+        uris.find((uri) => uri.includes('actual')) ??
+        uris.find((uri) => uri.includes('frame'));
       const trackUris = frameTrack
         ? [frameTrack, ...uris.filter((u) => u === '/sched_cpu0')]
         : ['/sched_cpu0'];
@@ -264,15 +263,11 @@ test.describe.serial('timeline image rendering', () => {
         trackUris,
         timeSpan,
         widthPx: 1200,
-        perTrackTimeoutMs: 20_000,
-        // Pure content canvas: this test asserts on the leftmost pixels of
-        // the timeline area, which the (default) shell column would occupy.
-        includeTrackShell: false,
-        includeTimeAxis: false,
       });
-      // Sample the left 5% of each track band: the 62.7ms worst frame starts
-      // before the window and spans its left edge, so the left edge of the
-      // frame timeline band must contain non-background content.
+      // Sample the left 5% of the timeline area (right of the always-drawn
+      // shell column): the 62.7ms worst frame starts before the window and
+      // spans its left edge, so the left edge of the frame timeline band
+      // must contain non-background content.
       const bmp = await createImageBitmap(r.blob);
       const canvas = document.createElement('canvas');
       canvas.width = bmp.width;
@@ -281,11 +276,16 @@ test.describe.serial('timeline image rendering', () => {
       ctx.drawImage(bmp, 0, 0);
       const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       const dpr = canvas.width / r.width;
+      // TRACK_SHELL_WIDTH is 240 CSS px (see css_constants).
+      const shellPx = Math.floor(240 * dpr);
       const bandColors = new Set<string>();
       const box = r.trackBoxes[0];
       if (box !== undefined) {
-        const y0 = Math.floor((box.top + box.height / 2) * dpr);
-        for (let x = 0; x < Math.floor(canvas.width * 0.05); x += 2) {
+        // Sample the upper quarter of the band: a slice spanning the left
+        // edge fills the mid-band with one solid frame color (correctly),
+        // while the frame lane's content/label row is where variety shows.
+        const y0 = Math.floor((box.top + box.height * 0.25) * dpr);
+        for (let x = shellPx; x < shellPx + Math.floor(canvas.width * 0.05); x += 2) {
           const i = (y0 * canvas.width + x) * 4;
           bandColors.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
         }
@@ -313,7 +313,6 @@ test.describe.serial('timeline image rendering', () => {
         trackUris: ['/sched_cpu0', '/sched_cpu1'],
         timeSpan,
         widthPx: 1600,
-        perTrackTimeoutMs: 20_000,
       });
       return {width: r.width, height: r.height, warnings: [...r.warnings]};
     }, A3_WINDOW);
@@ -322,198 +321,187 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.height).toBeGreaterThan(0);
   });
 
-  test('C1: default shell + time axis decorations', async () => {
+  test('C1: shell + time axis decorations are always present', async () => {
+    // A timeline image by definition carries the track-name shell and the
+    // time axis (fixed decorations, not options). Assert both bands contain
+    // rendered (non-flat-background) pixels.
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
-      const common = {
+      const r = await trace.timelineImage.renderTimelineImage({
         trackUris: ['/sched_cpu0'],
         timeSpan,
         widthPx: 1200,
-        perTrackTimeoutMs: 20_000,
-      };
-      const withDecorations =
-        await trace.timelineImage.renderTimelineImage(common);
-      const bare = await trace.timelineImage.renderTimelineImage({
-        ...common,
-        includeTrackShell: false,
-        includeTimeAxis: false,
       });
-      const sampleRegion = async (
-        r: Awaited<ReturnType<typeof trace.timelineImage.renderTimelineImage>>,
-      ) => {
-        const bmp = await createImageBitmap(r.blob);
-        const canvas = document.createElement('canvas');
-        canvas.width = bmp.width;
-        canvas.height = bmp.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(bmp, 0, 0);
-        const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const dpr = canvas.width / r.width;
+      const bmp = await createImageBitmap(r.blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(bmp, 0, 0);
+      const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const dpr = canvas.width / r.width;
+      const colorsIn = (x0: number, y0: number, x1: number, y1: number) => {
         const colors = new Set<string>();
-        return (x0: number, y0: number, x1: number, y1: number) => {
-          for (let y = Math.floor(y0 * dpr); y < Math.ceil(y1 * dpr); y++) {
-            for (let x = Math.floor(x0 * dpr); x < Math.ceil(x1 * dpr); x++) {
-              const i = (y * canvas.width + x) * 4;
-              colors.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
-            }
+        for (let y = Math.floor(y0 * dpr); y < Math.ceil(y1 * dpr); y++) {
+          for (let x = Math.floor(x0 * dpr); x < Math.ceil(x1 * dpr); x++) {
+            const i = (y * canvas.width + x) * 4;
+            colors.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
           }
-          const size = colors.size;
-          colors.clear();
-          return size;
-        };
+        }
+        return colors.size;
       };
-      const sample = await sampleRegion(withDecorations);
-      const firstBox = withDecorations.trackBoxes[0];
+      const firstBox = r.trackBoxes[0]!;
       return {
-        warnings: [...withDecorations.warnings],
-        heightDelta: withDecorations.height - bare.height,
-        trackDepth: firstBox?.depth,
+        warnings: [...r.warnings],
+        trackDepth: firstBox.depth,
         // Shell column strip (left of the track band) must contain text
         // pixels, i.e. more than a flat background color.
-        shellColors: sample(
-          0,
-          firstBox!.top,
-          240,
-          firstBox!.top + firstBox!.height,
-        ),
-        // Time axis row must contain tick/label pixels.
-        axisColors: sample(250, 0, 1200, 22),
+        shellColors: colorsIn(0, firstBox.top, 240, firstBox.top + firstBox.height),
+        // Time axis row must contain tick/label pixels. The first track
+        // starts below it, proving the axis band is reserved.
+        axisColors: colorsIn(250, 0, 1200, firstBox.top),
+        firstTop: firstBox.top,
       };
     }, A1_WINDOW);
-    // 22px time axis row accounts for the height difference.
-    expect(result.heightDelta).toBe(22);
     expect(result.warnings).toEqual([]);
-    // Depth is fixture-dependent (top-level group vs direct child); it only
-    // needs to be present and non-negative.
     expect(result.trackDepth).toBeGreaterThanOrEqual(0);
+    expect(result.firstTop).toBeGreaterThan(0);
     expect(result.shellColors).toBeGreaterThan(2);
     expect(result.axisColors).toBeGreaterThan(2);
   });
 
-  test('G1: default composition matches the live UI track order', async () => {
-    // Golden scenario: no trackUris/timeSpan (all defaults). The offscreen
-    // track list must match what the interactive UI actually shows — same
-    // set (default-expanded workspace semantics) and, critically, the same
-    // top-to-bottom ORDER, asserted against the live DOM's track titles.
-    // This is the institutional guard against "parameter drift" between
-    // demo renders the default is defined by the UI, not by
-    // whatever list a script happens to build.
+  test('G1: explicit list renders in UI tree order when discovered live', async () => {
+    // With selection always explicit, the "match the UI" guard is: build
+    // the uri list from the live workspace (as listTracks does) and check
+    // the offscreen render's head matches the live DOM's visible prefix.
     const result = await helper.page.evaluate(async () => {
       const trace = window.ctx as unknown as TestTrace;
-      const r = await trace.timelineImage.renderTimelineImage({
-        widthPx: 1600,
-        // Default-track lists on this fixture are ~6400px tall; at the
-        // default dpr 2 that exceeds the 32M-pixel canvas guardrail.
-        devicePixelRatio: 1,
-        perTrackTimeoutMs: 30_000,
-      });
-      // Titles as the UI lays them out (DOM order = visual order).
+      const uris: string[] = [];
+      const groupNames = new Set<string>();
+      const visit = (n: {uri?: string; name?: string; children: unknown[]}) => {
+        if (n.uri) uris.push(n.uri);
+        if (n.children.length > 0 && n.name) groupNames.add(n.name);
+        for (const c of n.children as {uri?: string; name?: string; children: unknown[]}[]) {
+          visit(c);
+        }
+      };
+      visit(trace.defaultWorkspace.tracks);
       const uiTitles = [...document.querySelectorAll('.pf-track__title')]
         .map((e) => (e.textContent ?? '').trim())
-        .filter((t) => t.length > 0);
+        .filter((t) => t.length > 0)
+        // The DOM shows group header rows; group URIs expand to their leaf
+        // tracks in the render, so compare leaf sequences on both sides.
+        .filter((t) => !groupNames.has(t));
+      const r = await trace.timelineImage.renderTimelineImage({
+        // First ~40 workspace uris: enough to cover the live viewport.
+        trackUris: uris.slice(0, 40),
+        // No timeSpan: default is the whole trace (stateless).
+        widthPx: 1600,
+        devicePixelRatio: 1,
+      });
       return {
         warnings: [...r.warnings],
-        height: r.height,
-        trackCount: r.trackBoxes.length,
-        uiVisibleCount: uiTitles.length,
-        // First tracks for order comparison (UI renders only the viewport).
-        uiHead: uiTitles.slice(0, 10),
-        offscreenHead: r.trackBoxes.slice(0, 10).map((b) => b.name),
+        width: r.width,
+        names: r.trackBoxes.map((b) => b.name),
+        uiTitles,
       };
     });
-    // The zero-config default is capped at one viewable page (user-approved
-    // design): the fixture's full workspace (~6600px) must be truncated.
-    expect(result.warnings).toContain('TRUNCATED');
-    expect(result.height).toBeLessThanOrEqual(2160 + 22);
-    // The offscreen render includes at least the viewport's tracks; the DOM
-    // only materializes the viewport, so compare the common prefix.
-    expect(result.trackCount).toBeGreaterThanOrEqual(result.uiVisibleCount);
-    const k = Math.min(result.uiHead.length, result.offscreenHead.length);
+    expect(result.warnings).toEqual([]);
+    // Whole-trace default span is valid (never blank-by-state).
+    expect(result.width).toBe(1600);
+    expect(result.names.length).toBeGreaterThan(0);
+    // The live DOM materializes only the viewport (group/summary rows may
+    // be virtualized away), so compare the order over the common titles.
+    const uiSet = new Set(result.uiTitles);
+    const common = result.names.filter((n: string) => uiSet.has(n));
+    const k = Math.min(result.uiTitles.length, common.length);
     expect(k).toBeGreaterThanOrEqual(5);
-    expect(result.offscreenHead.slice(0, k)).toEqual(result.uiHead.slice(0, k));
+    expect(common.slice(0, k)).toEqual(result.uiTitles.slice(0, k));
   });
 
-  test('G2: row geometry matches the live UI DOM', async () => {
-    // Positional consistency oracle: every band the API renders must land
-    // at the same y/height as the same-named row in the interactive tree
-    // (within 1px). Guards against layout drift without any pixel oracle.
+  test('G2: row order matches the live UI; bands stack contiguously', async () => {
+    // Positional oracle under explicit selection: group URIs expand to
+    // their leaf tracks WITHOUT the 18px header rows the interactive tree
+    // draws, so absolute y parity with the DOM is not claimed; instead the
+    // leaf order must match the live tree and the bands must stack
+    // contiguously (each band starts exactly where the previous ended).
     const result = await helper.page.evaluate(async () => {
       const trace = window.ctx as unknown as TestTrace;
+      const uris: string[] = [];
+      const groupNames = new Set<string>();
+      const visit = (n: {uri?: string; name?: string; children: unknown[]}) => {
+        if (n.children.length > 0) {
+          if (n.name) groupNames.add(n.name);
+          for (const c of n.children as {uri?: string; name?: string; children: unknown[]}[]) {
+            visit(c);
+          }
+        } else if (n.uri) {
+          uris.push(n.uri);
+        }
+      };
+      visit(trace.defaultWorkspace.tracks);
       const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: uris.slice(0, 40),
         widthPx: 1690,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 30_000,
       });
-      const first = document.querySelector('.pf-track');
-      const clipY = first ? first.getBoundingClientRect().y : 172;
-      const rows = [...document.querySelectorAll('.pf-track__header')]
-        .map((e) => {
-          const b = e.getBoundingClientRect();
-          return {
-            name: (
-              e.querySelector('.pf-track__title')?.textContent ?? ''
-            ).trim(),
-            top: b.y - clipY,
-            height: b.height,
-          };
-        })
-        .filter(
-          (x) =>
-            x.name.length > 0 && x.height > 0 && x.top >= -2 && x.top < 620,
-        )
-        .slice(0, 12);
-      // API bands exclude the 22px time-axis row from this comparison.
-      const bands = r.trackBoxes
-        .slice(0, rows.length)
-        .map((b) => ({name: b.name, top: b.top - 22, height: b.height}));
-      return {rows, bands};
+      const uiLeafNames = [...document.querySelectorAll('.pf-track__title')]
+        .map((e) => (e.textContent ?? '').trim())
+        .filter((t) => t.length > 0 && !groupNames.has(t));
+      return {
+        warnings: [...r.warnings],
+        bands: r.trackBoxes.map((b) => ({
+          name: b.name,
+          top: b.top,
+          height: b.height,
+        })),
+        uiLeafNames,
+      };
     });
-    expect(result.rows.length).toBeGreaterThanOrEqual(6);
-    for (let i = 0; i < result.rows.length; i++) {
-      expect(result.bands[i].name).toBe(result.rows[i].name);
-      expect(
-        Math.abs(result.bands[i].top - result.rows[i].top),
-      ).toBeLessThanOrEqual(1);
-      expect(
-        Math.abs(result.bands[i].height - result.rows[i].height),
-      ).toBeLessThanOrEqual(1);
+    expect(result.warnings).toEqual([]);
+    expect(result.bands.length).toBeGreaterThan(0);
+    // Bands stack contiguously below the 22px time axis.
+    expect(result.bands[0].top).toBe(22);
+    for (let i = 1; i < result.bands.length; i++) {
+      expect(result.bands[i].top).toBe(
+        result.bands[i - 1].top + result.bands[i - 1].height,
+      );
+      expect(result.bands[i].height).toBeGreaterThan(0);
     }
+    // Leaf order matches the live tree's visible prefix.
+    const k = Math.min(result.uiLeafNames.length, result.bands.length);
+    expect(k).toBeGreaterThanOrEqual(5);
+    expect(result.bands.slice(0, k).map((b) => b.name)).toEqual(
+      result.uiLeafNames.slice(0, k),
+    );
   });
 
-  test('thread uri expands to its capability tracks; aspectRatio shape', async () => {
+  test('thread and process group uris expand to their capability tracks', async () => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
       const r = await trace.timelineImage.renderTimelineImage({
         // /thread_<utid> renders every capability track of the thread;
-        // the utid comes from trace_processor, e.g.
-        // select utid from thread where tid = 13585.
-        trackUris: ['/sched_cpu0', '/thread_7303'],
+        // /process_<upid> (a summary group) expands the same way.
+        trackUris: ['/sched_cpu0', '/thread_7303', '/process_885'],
         timeSpan,
-        aspectRatio: 4 / 3,
+        widthPx: 800,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
       });
       return {
-        width: r.width,
-        height: r.height,
         warnings: [...r.warnings],
         uris: r.trackBoxes.map((b) => b.uri),
-        names: r.trackBoxes.map((b) => b.name),
       };
     }, A2_WINDOW);
     expect(result.warnings).toEqual([]);
-    // The thread group expands to its state + slice tracks, after the
-    // explicit uri (list order is the render order).
-    expect(result.uris).toEqual([
-      '/sched_cpu0',
-      '/process_885/thread_7303_state',
-      '/slice_301',
-    ]);
-    expect(result.names[1]).toBe('RenderThread 13585');
-    // Height is track-derived; the width must be exactly height * 4/3.
-    expect(result.width).toBe(Math.round(result.height * (4 / 3)));
+    const uris = result.uris;
+    expect(uris[0]).toBe('/sched_cpu0');
+    // The thread group expands to its state + slice tracks.
+    expect(uris).toContain('/process_885/thread_7303_state');
+    expect(uris).toContain('/slice_301');
+    // The process group expands to many leaf tracks, all after the thread.
+    expect(uris.length).toBeGreaterThan(10);
   });
 
   test('unknown trackUris reject the render', async () => {
@@ -526,7 +514,6 @@ test.describe.serial('timeline image rendering', () => {
           timeSpan,
           widthPx: 800,
           devicePixelRatio: 1,
-          perTrackTimeoutMs: 20_000,
         });
         return null;
       } catch (e) {
@@ -580,7 +567,6 @@ test.describe.serial('timeline image rendering', () => {
         timeSpan,
         widthPx: 800,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
       };
       const [a, b] = await Promise.all([
         trace.timelineImage.renderTimelineImage(opts),
@@ -611,7 +597,6 @@ test.describe.serial('timeline image rendering', () => {
         widthPx: 800,
         heightPx: 1200,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
       });
       return {width: r.width, height: r.height, warnings: [...r.warnings]};
     }, A2_WINDOW);
@@ -634,7 +619,6 @@ test.describe.serial('timeline image rendering', () => {
         widthPx: 800,
         heightPx: 30,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
       });
       return {height: r.height, warnings: [...r.warnings]};
     }, A2_WINDOW);

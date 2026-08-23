@@ -76,7 +76,6 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
         timeSpan: {start: win.start, end: win.end},
         widthPx: 1200,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
       });
       const bmp = await createImageBitmap(r.blob);
       const c = document.createElement('canvas');
@@ -102,16 +101,16 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
   });
 
   test('default composition contains the scripted tracks in tree order', async () => {
-    // On this fixture the interactive tree renders thread groups expanded
-    // while the offscreen default collection shows collapsed summary rows,
-    // so UI-DOM pairing (G1/G2) is not well-defined here; the structural
-    // expectation is asserted directly against the workspace semantics.
+    // Selection is always explicit; the whole workspace can be requested
+    // by listing its groups (the top-level process group expands to every
+    // leaf track of the fixture).
     const result = await helper.page.evaluate(async () => {
       const trace = window.ctx as unknown as TestTrace;
       const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: ['/process_1'],
+        // No timeSpan: stateless default = the whole trace.
         widthPx: 1600,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 30_000,
       });
       return {
         warnings: [...r.warnings],
@@ -120,10 +119,8 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
     });
     expect(result.warnings).toEqual([]);
     const names = result.boxes.map((b: {name: string}) => b.name);
-    expect(names).toContain('com.example.app 1');
     expect(names).toContain('RenderThread 4543');
     expect(names).toContain('main 100');
-    expect(names).toContain('cpu_frequency value');
     // Bands stack top-to-bottom with positive heights.
     let prevTop = -1;
     for (const b of result.boxes) {
@@ -141,7 +138,6 @@ test.describe.serial('timeline image (synthetic fixture)', () => {
         timeSpan: {start: win.start, end: win.end},
         widthPx: 1200,
         devicePixelRatio: 1,
-        perTrackTimeoutMs: 20_000,
       };
       const render = async () => {
         const r = await trace.timelineImage.renderTimelineImage(opts);

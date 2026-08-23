@@ -68,8 +68,7 @@ for (const f of FIXTURES) {
         head: r.trackBoxes.slice(0, 3).map((b) => b.name)};
     };
     const out = [];
-    // S1 zero-config default: capped at 2160px + TRUNCATED when full set is taller.
-    out.push(await shot({widthPx: 1200, devicePixelRatio: 1, perTrackTimeoutMs: 30000}, 'default'));
+    // S1 (zero-arg default) removed: selection is explicit by design.
     // S2 key-window set (user-approved): full-CPU freq+sched + key thread(s).
     // Resolve thread group URIs by "<name> <tid>" title (in-page discovery;
     // the API itself only accepts URIs).
@@ -86,18 +85,18 @@ for (const f of FIXTURES) {
     out.push(await shot({
       trackUris: uris.concat(threadGroups),
       timeSpan: {start: spec.window[0], end: spec.window[1]},
-      widthPx: 1600, devicePixelRatio: 1, perTrackTimeoutMs: 30000,
+      widthPx: 1600, devicePixelRatio: 1,
     }, 'tuned'));
-    return {uris, ...out.reduce((a, r, i) => (a[i === 0 ? 's1' : 's2'] = r, a), {})};
+    return {uris, tuned: out[0]};
   }, f);
   await browser.close();
-  for (const [k, tag] of [['s1', 'default'], ['s2', 'tuned']]) {
-    const r = res[k];
-    writeFileSync(`${OUT}${f.tag}-${tag}.png`, Buffer.from(r.b64, 'base64'));
-    rows.push({fixture: f.tag, case: tag, basis: f.basis, w: r.w, h: r.h, tracks: r.tracks,
+  {
+    const r = res.tuned;
+    writeFileSync(`${OUT}${f.tag}-tuned.png`, Buffer.from(r.b64, 'base64'));
+    rows.push({fixture: f.tag, case: 'tuned', basis: f.basis, w: r.w, h: r.h, tracks: r.tracks,
       warn: r.warn, colors: r.colors, ms: r.ms, head: r.head});
   }
-  console.log(`${f.tag}: default ${res.s1.w}x${res.s1.h} ${res.s1.tracks}t warn=${JSON.stringify(res.s1.warn)} | tuned ${res.s2.w}x${res.s2.h} ${res.s2.tracks}t warn=${JSON.stringify(res.s2.warn)} head=${JSON.stringify(res.s2.head)}`);
+  console.log(`${f.tag}: tuned ${res.tuned.w}x${res.tuned.h} ${res.tuned.tracks}t warn=${JSON.stringify(res.tuned.warn)} head=${JSON.stringify(res.tuned.head)}`);
 }
 writeFileSync(OUT + 'smoke.json', JSON.stringify(rows, null, 1));
 console.log(`TOTAL ${((Date.now() - T0) / 1000).toFixed(0)}s`);

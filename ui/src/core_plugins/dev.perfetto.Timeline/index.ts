@@ -83,17 +83,19 @@ export default class TimelinePlugin implements PerfettoPlugin {
 
 /**
  * Adapter between the public TimelineImageManager and the offscreen renderer:
- * resolves the default track set and validates the time span.
+ * validates the selection and the time span.
  */
 async function renderTimelineImageAdapter(
   trace: TraceImpl,
   opts: Partial<TimelineImageOptions>,
 ): Promise<TimelineImageRenderOutput> {
-  // Default collection (no explicit trackUris): mirror exactly what the
-  // interactive tree shows — group header rows (summary/headless
-  // containers, expanded or collapsed) plus leaf tracks, in tree order.
-  // Explicit trackUris keeps the flat-URI semantics (headless URIs expand
-  // to their leaf descendants); the list order is the render order.
+  // Rendering is an act of deliberate selection; there is no default set.
+  if (opts.trackUris === undefined || opts.trackUris.length === 0) {
+    throw new Error(
+      'renderTimelineImage: trackUris is required (and must not be empty). ' +
+        'Discover URIs with the listTracks message or via SQL.',
+    );
+  }
   // A trace can be loaded (traceInfo available) while plugins are still
   // building the workspace; rendering then would mis-report every URI as
   // missing. Wait briefly for the first tracks to appear.
@@ -121,13 +123,10 @@ async function renderTimelineImageAdapter(
     );
   }
 
-  const defaultNodes = opts.trackUris
-    ? undefined
-    : collectDefaultTrackNodes(trace.defaultWorkspace.tracks);
-
   // Accept plain {start, end} time spans (e.g. from postMessage or JSON,
   // where BigInts arrive as strings) by normalizing to
-  // HighPrecisionTimeSpan; default to the visible window.
+  // HighPrecisionTimeSpan.
+  const info = trace.traceInfo;
   const toTime = (t: time | string): time =>
     typeof t === 'string' ? Time.fromRaw(BigInt(t)) : t;
   const timeSpan = opts.timeSpan
@@ -135,11 +134,15 @@ async function renderTimelineImageAdapter(
         toTime(opts.timeSpan.start),
         toTime(opts.timeSpan.end),
       )
-    : trace.timeline.visibleWindow;
+    : // Stateless default: the whole trace, never whatever the interactive
+      // UI happens to be showing.
+      HighPrecisionTimeSpan.fromTime(
+        info?.start ?? Time.ZERO,
+        info?.end ?? Time.ZERO,
+      );
   // A span entirely outside the trace bounds would render a blank image that
   // still looks like a valid render; reject it up front. Partial overlap is
   // fine: the tracks simply have no data before/after the trace.
-  const info = trace.traceInfo;
   if (
     info !== undefined &&
     (timeSpan.end.lte(info.start) || timeSpan.start.gte(info.end))
@@ -153,45 +156,11 @@ async function renderTimelineImageAdapter(
 
   const output = await renderOffscreenTimeline({
     trace,
-    trackUris: opts.trackUris ?? [],
-    trackNodes: defaultNodes,
+    trackUris: opts.trackUris,
     timeSpan,
     widthPx: opts.widthPx,
     heightPx: opts.heightPx,
-    aspectRatio: opts.aspectRatio,
     devicePixelRatio: opts.devicePixelRatio,
-    dataResolutionScale: opts.dataResolutionScale,
-    perTrackTimeoutMs: opts.perTrackTimeoutMs,
-    includeTrackShell: opts.includeTrackShell,
-    includeTimeAxis: opts.includeTimeAxis,
   });
   return output;
-}
-
-/**
- * The rows the interactive timeline would show for the default workspace:
- * every group container contributes its own (18px summary) row, plus its
- * children when expanded; plain leaf tracks contribute themselves. Group
- * containers may be headless and/or URI-less — the interactive tree still
- * shows them as title rows, so they are collected as nodes, not URIs.
- */
-function collectDefaultTrackNodes(
-  node: TrackNode,
-): {node: TrackNode; depth: number}[] {
-  const rows: {node: TrackNode; depth: number}[] = [];
-  const walk = (n: TrackNode, d: number) => {
-    for (const child of n.children) {
-      const isGroup = child.isSummary || child.headless;
-      if (isGroup) {
-        rows.push({node: child, depth: d});
-        if (child.expanded) walk(child, d + 1);
-      } else {
-        rows.push({node: child, depth: d});
-        // Non-group nodes with children (rare) still descend.
-        if (child.children.length > 0) walk(child, d + 1);
-      }
-    }
-  };
-  walk(node, 0);
-  return rows;
 }

@@ -30,13 +30,15 @@ assume that setup.
 
 ## Step 1: Request the image
 
-Post a `renderTimelineImage` message to the iframe. The minimal form —
-default track set, current visible window, 1920px wide PNG — is:
+Post a `renderTimelineImage` message to the iframe. The minimal form is one
+track list — everything else has a default (`timeSpan`: the whole trace,
+`widthPx`: 1920, `devicePixelRatio`: 2, `format`: PNG):
 
 ```js
 const reqId = 'img-1';
 iframe.contentWindow.postMessage(
-    {perfetto: {action: 'renderTimelineImage', id: reqId}}, '*');
+    {perfetto: {action: 'renderTimelineImage', id: reqId,
+      options: {trackUris: ['/thread_7303']}}}, '*');
 ```
 
 You do not need to wait for the trace to load before sending this: requests
@@ -89,18 +91,19 @@ iframe.contentWindow.postMessage(
 
 Image size, with defaults:
 
-- `widthPx`: the width in CSS pixels. Default **1920**.
+- `widthPx`: the width in CSS pixels. Default **1920**. For a target aspect
+  ratio instead of a fixed width, render once, read `height` from the
+  result (it does not depend on the width), and re-render with
+  `widthPx = round(height * ratio)` — the output is identical.
 - `heightPx`: optional exact canvas height. The track content has a natural
   height (time axis + track stack); a larger `heightPx` pads the remainder
   with background (fixed-size report grids), a smaller one clips the content
   and reports a `TRUNCATED` warning. Default: the image is exactly as tall
-  as the content (the zero-config default composition is capped at 2160 px
-  instead).
-- `aspectRatio`: derives the width from the canvas height (e.g. `4/3`),
-  for when the exact pixel height is not known in advance. Mutually
-  exclusive with `widthPx`.
+  as the content.
 
 So a fixed 1080x1920 report cell is `{widthPx: 1080, heightPx: 1920}`.
+Track names (shell) and the time axis are always drawn — they are part of
+what a timeline image is, not options.
 
 ## Step 3: Receive the result
 
@@ -137,7 +140,8 @@ metadata: dimensions, effective `devicePixelRatio`, per-track bounding boxes
 
 | Symptom | Meaning |
 | --- | --- |
-| `TRUNCATED` warning | The default (no `trackUris`) composition exceeded the 2160px height cap. Request an explicit track set. |
+| `TRUNCATED` warning | `heightPx` is smaller than the track content; the content was clipped. Drop `heightPx` or enlarge it. |
+| Render error `trackUris is required` | Selection is explicit — pass `trackUris` (discover URIs with `listTracks`). |
 | Render error `unknown track uris` | A URI in `trackUris` matched nothing in the workspace. Check the URI (ids come from trace_processor tables). |
 | `TIMELINE_UNAVAILABLE` warning | The timeline plugin did not register a renderer (no trace loaded, or load failed). |
 | `error: 'render queue full'` | More than 32 requests queued while one was running. Render less concurrently. |

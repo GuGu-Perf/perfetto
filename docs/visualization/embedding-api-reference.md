@@ -103,13 +103,13 @@ iframe.contentWindow.postMessage(
         action: 'renderTimelineImage',
         id: reqId,
         options: {
-          // The list order is the render order (top to bottom).
+          // Required; the list order is the render order (top to bottom).
           // /thread_<utid> expands to every capability track of the thread;
           // obtain the utid via SQL: select utid from thread where tid = 4543.
           trackUris: ['/thread_7303', '/cpu_freq_cpu0'],
           timeSpan: {start: '3428202643641', end: '3428410622726'},
-          widthPx: 1200,           // or aspectRatio (mutually exclusive)
-          devicePixelRatio: 1,
+          widthPx: 1200,           // default 1920
+          devicePixelRatio: 1,     // default 2
         },
       },
     },

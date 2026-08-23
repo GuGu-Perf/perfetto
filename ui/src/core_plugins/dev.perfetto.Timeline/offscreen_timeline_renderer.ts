@@ -59,7 +59,7 @@ import {
   TRACK_SHELL_WIDTH,
 } from '../../frontend/css_constants';
 import {traceEvent} from '../../core/metatracing';
-import {DEFAULT_TRACK_MIN_HEIGHT_PX, TrackView} from './track_view';
+import {TrackView} from './track_view';
 import {generateTicks, getMaxMajorTicks, TickType} from './gridline_helper';
 import {
   getDefaultCanvasColors,
@@ -92,22 +92,11 @@ const SHELL_TITLE_OFFSET_PX = 3;
 const SHELL_FONT = `300 14px ${FONT_COMPACT}`;
 const DEFAULT_WIDTH_PX = 1920;
 // Zero-config default cap (user-approved design): the default composition
-// (all visible workspace tracks) is truncated to one viewable page; request
-// an explicit trackUris/trackNames set for the full list.
-const DEFAULT_MAX_HEIGHT_PX = 2160;
-
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
   // Ordered list of track URIs to render, top to bottom. Ignored when
   // `trackNodes` is provided.
   readonly trackUris: readonly string[];
-  // Pre-resolved nodes in final order (adapter default collection): each
-  // entry renders as-is, group headers included (18px summary rows, matching
-  // the interactive tree). Takes precedence over `trackUris`.
-  readonly trackNodes?: ReadonlyArray<{
-    node: TrackNode;
-    depth: number;
-  }>;
   // Exact canvas height in CSS px. The track stack's natural height is
   // `axis + sum(track heights)`; when this is shorter the remainder is
   // background padding (deterministic output for report grids); when it is
@@ -123,25 +112,20 @@ export interface OffscreenTimelineRenderOptions {
   // Target width/height ratio; the width becomes round(height * ratio),
   // where the height derives from the track set. Mutually exclusive with
   // `widthPx`.
-  readonly aspectRatio?: number;
   // Device pixel ratio of the produced canvas. Default: 2.
   readonly devicePixelRatio?: number;
   // Data is fetched at this fraction of the canvas resolution (power-of-two
   // quantization preserved). Default: 0.5 (1x data on a 2x canvas).
-  readonly dataResolutionScale?: number;
   // Per-track warm-up budget in ms before the track is drawn as-is (possibly
   // with loading placeholders) and reported in `timedOutTracks`.
   // Default: 5000.
-  readonly perTrackTimeoutMs?: number;
   // Maximum number of warm-up/draw rounds (fixed point for data-dependent
   // second-order queries). Default: 3.
   readonly maxRounds?: number;
   // Draw the track shell column (names, indentation) on the left, mirroring
   // the interactive timeline's track shell. Default: true.
-  readonly includeTrackShell?: boolean;
   // Draw the time axis row (ticks + timecode labels, locale-independent)
   // above the tracks. Default: true.
-  readonly includeTimeAxis?: boolean;
 }
 
 export interface OffscreenTimelineRenderOutput {
@@ -184,10 +168,7 @@ export async function renderOffscreenTimeline(
     timeSpan,
     widthPx,
     heightPx,
-    aspectRatio,
     devicePixelRatio = 2,
-    dataResolutionScale = 0.5,
-    perTrackTimeoutMs = 5_000,
     // 8, not 3: data-dependent query chains occasionally need more than
     // three warm-up/draw rounds to converge; a premature cutoff leaves two
     // calls in different converged states (observed as a slice label
@@ -195,22 +176,16 @@ export async function renderOffscreenTimeline(
     // still exits early once two rounds agree, so healthy renders stay at
     // 2-3 rounds; this ceiling only protects the fixed point.
     maxRounds = 8,
-    includeTrackShell = true,
-    includeTimeAxis = true,
-    trackNodes,
   } = options;
 
-  // Shape contract: widthPx and aspectRatio constrain the same degree of
-  // freedom (the height is always derived from the track set), so at most
-  // one may be given.
-  if (widthPx !== undefined && aspectRatio !== undefined) {
-    throw new Error(
-      'renderOffscreenTimeline: widthPx and aspectRatio are mutually exclusive',
-    );
-  }
-  if (aspectRatio !== undefined && !(aspectRatio > 0)) {
-    throw new Error('renderOffscreenTimeline: aspectRatio must be > 0');
-  }
+  // Fixed internal knobs (deliberately not caller-tunable — keep the API
+  // surface to product-spec parameters only):
+  const dataResolutionScale = 0.5; // 1x data on the default 2x canvas.
+  // Generous per-track warm-up budget; slower tracks still produce output,
+  // reported via a TIMEOUT warning.
+  const perTrackTimeoutMs = 20_000;
+  const includeTrackShell = true; // a timeline image has track names.
+  const includeTimeAxis = true; // a timeline image has a time axis.
   if (widthPx !== undefined && !(widthPx >= 1)) {
     throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
   }
@@ -253,64 +228,32 @@ export async function renderOffscreenTimeline(
     expanded: boolean;
   }
   const entries: LayoutEntry[] = [];
-  if (trackNodes) {
-    // Pre-resolved default collection: group header rows (summary or
-    // headless containers) render as 18px title rows, exactly the rows the
-    // interactive tree shows.
-    for (const {node, depth} of trackNodes) {
-      const isGroupHeader = node.isSummary || node.headless;
+  for (const uri of trackUris) {
+    // Grouping nodes (threads, processes, summary groups) expand to their
+    // leaf tracks, so the requested tracks actually render instead of
+    // collapsing to a title row.
+    const nodes = resolveRenderableTrackNodes(trace, uri);
+    if (nodes.length === 0) {
+      missingTracks.push(uri);
+      continue;
+    }
+    const requestDepth = uriDepth.get(uri) ?? 0;
+    for (const node of nodes) {
+      const nodeUri = node.uri ?? uri;
       entries.push({
         node,
-        depth,
-        uri: node.uri ?? '',
-        isGroupHeader,
-        expanded: node.expanded,
+        // Expanded descendants render one level deeper than the request.
+        depth: uriDepth.get(nodeUri) ?? requestDepth + 1,
+        uri: nodeUri,
+        isGroupHeader: false,
+        expanded: false,
       });
-    }
-  } else {
-    for (const uri of trackUris) {
-      // Headless nodes are grouping containers (e.g. a thread node holding
-      // its slice & state tracks); expand them so the requested tracks
-      // actually render instead of collapsing to zero height.
-      const nodes = resolveRenderableTrackNodes(trace, uri);
-      if (nodes.length === 0) {
-        missingTracks.push(uri);
-        continue;
-      }
-      const requestDepth = uriDepth.get(uri) ?? 0;
-      for (const node of nodes) {
-        const nodeUri = node.uri ?? uri;
-        entries.push({
-          node,
-          // Expanded descendants render one level deeper than the request.
-          depth: uriDepth.get(nodeUri) ?? requestDepth + 1,
-          uri: nodeUri,
-          isGroupHeader: false,
-          expanded: false,
-        });
-      }
     }
   }
   const seenUris = new Set<string>();
-  // Set when the zero-config default collection is cut short by the height
-  // cap; surfaced as a TRUNCATED warning on the public result.
-  let truncatedByDefaultCap = false;
-  // The zero-config default collection is capped to one viewable page; with
-  // an explicit heightPx the caller's page height is the budget instead.
-  const defaultCollectionBudget =
-    axisHeight + (heightPx ?? DEFAULT_MAX_HEIGHT_PX);
-  for (const {node, depth, uri, isGroupHeader, expanded} of entries) {
-    // Only the zero-config default collection is capped; explicit trackUris
-    // sets are honored up to the canvas guardrail.
-    if (
-      trackNodes !== undefined &&
-      top + nodeHeight(trace, node) > defaultCollectionBudget
-    ) {
-      truncatedByDefaultCap = true;
-      break;
-    }
-    // A headless URI expands to its leaf tracks, which may also appear
-    // verbatim in the list; render each track only once.
+  for (const {node, depth, uri} of entries) {
+    // A group URI expands to leaf tracks which may also appear verbatim in
+    // the list; render each track only once, at its first position.
     if (uri !== '' && seenUris.has(uri)) continue;
     if (uri !== '') seenUris.add(uri);
     // showHeadless=true: group header rows (headless summary containers)
@@ -323,8 +266,8 @@ export async function renderOffscreenTimeline(
       top,
       height: view.height,
       depth,
-      isGroupHeader,
-      expanded,
+      isGroupHeader: false,
+      expanded: false,
     });
     top += view.height;
   }
@@ -359,11 +302,7 @@ export async function renderOffscreenTimeline(
   const truncatedByHeightPx =
     heightPx !== undefined && contentHeight > heightPx;
   const cssHeight = heightPx ?? contentHeight;
-  const cssWidth =
-    widthPx ??
-    (aspectRatio !== undefined
-      ? Math.round(cssHeight * aspectRatio)
-      : DEFAULT_WIDTH_PX);
+  const cssWidth = widthPx ?? DEFAULT_WIDTH_PX;
   // With many tracks (tall canvas) the default dpr 2 can exceed the browser
   // canvas limits; negotiate rather than failing a zero-config call.
   const dpr = negotiateDpr(cssWidth, cssHeight, devicePixelRatio);
@@ -617,9 +556,7 @@ export async function renderOffscreenTimeline(
     trackBoxes,
     timedOutTracks,
     warnings: [
-      ...((truncatedByDefaultCap || truncatedByHeightPx)
-        ? (['TRUNCATED'] as const)
-        : []),
+      ...(truncatedByHeightPx ? (['TRUNCATED'] as const) : []),
     ],
     devicePixelRatio: dpr,
     rounds,
@@ -652,16 +589,6 @@ export function negotiateDpr(
 // Approximate row height for the default-cap check without constructing a
 // TrackView: mirrors getTrackHeight()'s rules (renderer height, floored at
 // the UI's minimum).
-function nodeHeight(trace: TraceImpl, node: TrackNode): number {
-  const renderer = node.uri
-    ? trace.tracks.getWrappedTrack(node.uri)?.track
-    : undefined;
-  const h = renderer?.getHeight?.();
-  return h === undefined
-    ? DEFAULT_TRACK_MIN_HEIGHT_PX
-    : Math.max(h, DEFAULT_TRACK_MIN_HEIGHT_PX);
-}
-
 function resolveTrackNode(
   trace: TraceImpl,
   uri: string,
@@ -687,11 +614,14 @@ function resolveRenderableTrackNodes(
 ): TrackNode[] {
   const node = resolveTrackNode(trace, uri);
   if (!node) return [];
-  if (!node.headless) return [node];
+  // Any grouping node (headless container, process or summary group — i.e.
+  // a node with children) expands to its leaf tracks; a URI is either a
+  // group (render everything under it) or a single capability track.
+  if (!node.hasChildren && !node.headless) return [node];
   const descendants: TrackNode[] = [];
   const collect = (n: TrackNode) => {
     for (const child of n.children) {
-      if (child.headless) {
+      if (child.hasChildren || child.headless) {
         collect(child);
       } else {
         descendants.push(child);

@@ -52,19 +52,6 @@ test('guardrail still rejects shapes overflowing at 1x', () => {
   expect(() => negotiateDpr(8000, 8000, 1)).toThrow('too large');
 });
 
-test('widthPx and aspectRatio are mutually exclusive', async () => {
-  const trace = createFakeTraceImpl();
-  await expect(
-    renderOffscreenTimeline({
-      trace,
-      trackUris: [],
-      timeSpan: span(0n, 1_000n),
-      widthPx: 100,
-      aspectRatio: 4 / 3,
-    }),
-  ).rejects.toThrow('mutually exclusive');
-});
-
 test('zero-width timeSpan (start == end) is rejected', async () => {
   const trace = createFakeTraceImpl();
   await expect(
@@ -87,18 +74,6 @@ test('inverted timeSpan (start > end) is rejected', async () => {
       widthPx: 100,
     }),
   ).rejects.toThrow('timeSpan must have start < end');
-});
-
-test('aspectRatio <= 0 is rejected', async () => {
-  const trace = createFakeTraceImpl();
-  await expect(
-    renderOffscreenTimeline({
-      trace,
-      trackUris: [],
-      timeSpan: span(0n, 1_000n),
-      aspectRatio: 0,
-    }),
-  ).rejects.toThrow('aspectRatio must be > 0');
 });
 
 test('oversized canvas is rejected before any canvas is created', async () => {
