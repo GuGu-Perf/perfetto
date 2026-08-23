@@ -38,6 +38,7 @@ import type {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
 import {calculateResolution} from '../../base/resolution';
 import {TimeScale} from '../../base/time_scale';
 import {Time, type duration} from '../../base/time';
+import {formatDuration} from '../../components/time_utils';
 import type {TrackRenderContext} from '../../public/track';
 import {TrackNode} from '../../public/workspace';
 import type {TraceImpl} from '../../core/trace_impl';
@@ -46,7 +47,6 @@ import {WebGLRenderer} from '../../base/gl/webgl_renderer';
 import type {Renderer} from '../../base/renderer';
 import {
   COLOR_BACKGROUND,
-  COLOR_BACKGROUND_SECONDARY,
   COLOR_BORDER,
   COLOR_TEXT,
   COLOR_TEXT_MUTED,
@@ -72,12 +72,19 @@ const MAX_CANVAS_AREA_PX = 32_000_000;
 // the "one minute per image" service budget (plan §1.4).
 const SECOND_ROUND_BUDGET_MS = 5_000;
 
-// Visual constants, kept in sync with the interactive timeline panels.
-// TimeAxisPanel.height is 22; per-level shell indentation mirrors the
-// --depth indirection in track_shell.scss.
+// Visual constants, mirroring the interactive timeline:
+// - TimeAxisPanel.height is 22.
+// - Track shell text and indentation come from track_shell.scss:
+//   .pf-track { font: weight 300, size var(--pf-font-size-m) (14px),
+//   font-family var(--pf-font-compact) }; grid indent column is
+//   depth * var(--indent-size) (8px); the title sits 3px into the shell and
+//   ellipsizes (text-overflow: ellipsis).
+// Colors resolve through the css_constants runtime variables, so the output
+// follows the page's active (light/dark) theme automatically.
 const TIME_AXIS_HEIGHT_PX = 22;
-const SHELL_INDENT_PX = 12;
-const SHELL_FONT = `12px ${FONT_COMPACT}`;
+const SHELL_INDENT_PX = 8;
+const SHELL_TITLE_OFFSET_PX = 3;
+const SHELL_FONT = `300 14px ${FONT_COMPACT}`;
 
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
@@ -416,11 +423,7 @@ export async function renderOffscreenTimeline(
     // coordinate space (the dpr transform above applies to the 2D ctx too).
     // Opaque backgrounds also clip any gridline overdraw into their strips.
     if (includeTrackShell) {
-      drawTrackShell(d2Ctx, trackBoxes, {
-        shellWidth,
-        axisHeight,
-        cssHeight,
-      });
+      drawTrackShell(d2Ctx, trackBoxes, shellWidth);
     }
     if (includeTimeAxis) {
       drawTimeAxis(d2Ctx, {
@@ -541,7 +544,9 @@ function clipText(
 /**
  * Track shell column: names indented by workspace depth, one line per track,
  * with row separators. A canvas-drawn simplification of the interactive
- * DOM shell (no expand arrows or hover affordances).
+ * DOM shell (no expand arrows or hover affordances), matching its computed
+ * styles: weight-300 14px condensed text, ellipsized titles, transparent
+ * background (the page background shows through), border-bottom per row.
  */
 function drawTrackShell(
   ctx: CanvasRenderingContext2D,
@@ -551,27 +556,26 @@ function drawTrackShell(
     height: number;
     depth: number;
   }>,
-  opts: {shellWidth: number; axisHeight: number; cssHeight: number},
+  shellWidth: number,
 ): void {
-  const {shellWidth, axisHeight, cssHeight} = opts;
   ctx.save();
-  ctx.fillStyle = COLOR_BACKGROUND_SECONDARY;
-  ctx.fillRect(0, axisHeight, shellWidth, cssHeight - axisHeight);
-  ctx.fillStyle = COLOR_BORDER;
-  ctx.fillRect(shellWidth - 1, axisHeight, 1, cssHeight - axisHeight);
+  // No shell background fill: the DOM shell is transparent over the page
+  // background, so the offscreen image keeps a uniform background too.
   ctx.font = SHELL_FONT;
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
+  ctx.textBaseline = 'alphabetic';
   for (const box of boxes) {
-    const x = 8 + Math.max(0, box.depth) * SHELL_INDENT_PX;
+    const x =
+      Math.max(0, box.depth) * SHELL_INDENT_PX + SHELL_TITLE_OFFSET_PX;
     ctx.fillStyle = COLOR_TEXT;
     ctx.fillText(
-      clipText(ctx, box.name, shellWidth - 8 - x),
+      clipText(ctx, box.name, shellWidth - 4 - x),
       x,
-      box.top + Math.min(box.height / 2, 9),
+      // 14px text on a 16px line, one pixel into the row (DOM layout).
+      box.top + 13,
     );
     ctx.fillStyle = COLOR_BORDER;
-    ctx.fillRect(0, box.top + box.height - 1, shellWidth - 1, 1);
+    ctx.fillRect(0, box.top + box.height - 1, shellWidth, 1);
   }
   ctx.restore();
 }
@@ -601,11 +605,21 @@ function drawTimeAxis(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   const timespan = timeSpan.toTimeSpan();
-  ctx.fillStyle = COLOR_TEXT_MUTED;
+  // Same labels as TimeAxisPanel.renderOffsetTimestamp: a bold label
+  // followed by the value, default (timecode) formatting only, which is
+  // locale-independent.
   const startTc = Time.toTimecode(timespan.start).toString(' ');
-  const durTc = Time.toTimecode(Time.fromRaw(timespan.duration)).toString(' ');
-  ctx.fillText(`Start: ${startTc}`, 6, 10, shellWidth - 12);
-  ctx.fillText(`Span: ${durTc}`, 6, 20, shellWidth - 12);
+  const durText = formatDuration(trace, timespan.duration);
+  const drawLabelAndValue = (label: string, value: string, y: number) => {
+    ctx.font = `bold 11px ${FONT_COMPACT}`;
+    const labelWidth = ctx.measureText(label).width;
+    ctx.fillStyle = COLOR_TEXT_MUTED;
+    ctx.fillText(label, 6, y, shellWidth - 12);
+    ctx.font = `11px ${FONT_COMPACT}`;
+    ctx.fillText(value, 6 + labelWidth, y, shellWidth - 12 - labelWidth);
+  };
+  drawLabelAndValue('Start: ', startTc, 10);
+  drawLabelAndValue('Duration: ', durText, 20);
 
   const contentWidth = cssWidth - shellWidth;
   if (contentWidth > 0 && timespan.duration > 0n) {

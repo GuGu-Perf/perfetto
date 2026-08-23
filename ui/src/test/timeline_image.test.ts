@@ -67,6 +67,7 @@ interface TestTrace {
         name: string;
         top: number;
         height: number;
+        depth: number;
       }>;
       perf: {
         loadMs: number;
