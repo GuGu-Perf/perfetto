@@ -683,6 +683,7 @@ trace.pftrace
 | v9.2 | 2026-08-23 | 末轮疏漏修复：AGPL fixture local-only + 上游合成 trace（ADR12）、拆 PR 0（ADR11）、postMessage 队列上限与失败清空、trackNamePatterns ReDoS 防护、locale 确定性验证（T1.11）、测试环境任务（T1.0）、feature flag 讨论项 |
 | v9.3 | 2026-08-23 | 新增 §6.5 开发期观测与调试（ADR13：复用 traceEvent/queryLog/sqlstats/metatrace，截图管线打点设计，双轨耗时统计）；D.4 产物增 querylog/metatrace；任务 T1.12 |
 | v9.5 | 2026-08-23 | 执行审计修正：D.4 增补 spec 产物路径并诚实登记六件套执行缺口；新立 T1.13（产物补齐）/T1.14（确定性残余 ⛔ 立账）；纠正变更流违规（代码先行、文档后补） |
+| v9.6 | 2026-08-23 | 人工 review 触发三缺陷修复并回归：B1 headless 容器零高度（离屏展开为叶子）、B2 CpuFreqTrack 窄窗口整条空白（补 whenDataReady+queryBounds）、warm-up 串行最坏 N×预算（并行化 + 后续轮 5s 上限，端到端 209ms/图）；timeSpan 字符串归一化入公共 API；新立 T1.15（track 覆盖率清单）/T1.16（workspace 时序竞争）；验证方法论新增像素级 band 分析（逐 track 非背景覆盖率 + 颜色数，自动检出空白带，替代肉眼 review 的不可靠性） |
 | v9.4 | 2026-08-23 | 新增 §5.4 性能优化方法论与杠杆清单（top-down 闭环：测全链路→阶段归因→攻大头→单变量→复测；16 项杠杆按阶段分组，含渲染服务真机 GPU/ANGLE 杠杆及像素一致性权衡）；§1.4/§8.5 交叉引用 |
 
 ---
@@ -751,6 +752,8 @@ trace.pftrace
 | T1.10 | WebGL 读回专项（colorSpace 一致性 + 大图 toBlob） | 两条读回路径输出一致 | T1.6 | ⬜ | 测试 | §9 风险 4 |
 | T1.13 | 产物规范补齐：harvester 脚本（manual run 六件套自动生成）+ 保留策略清理 + latest 软链 | D.4 承诺全部兑现：六件套齐、清理生效 | T1.9 | ⬜ | 脚本 | v9.5 补登记（此前执行缺口） |
 | T1.14 | 确定性残余抖动根因（真机 GPU headless 间歇 diff；嫌疑 MSAA，antialias=false 实验证伪简单路径并致非纯色回归；替代假设：残余逐出窗口/纹理缓存） | 复现率量化（≥100 次采样）+ 根因定位；期间 spec 保持 retries=2（已声明的技术债，非静默掩盖） | T1.10 | ⛔ | 调查记录 | v9.5 正式立账；与 T1.10 合并跟进 |
+| T1.15 | track 渲染器 whenDataReady 覆盖率清单（系统性债务：所有自带 BufferedBounds/AsyncMemo 状态的 track 均需 queryBounds+whenDataReady 才能离屏正确出图；T1.4 只改了 slice/counter 两基类） | 盘点全部注册 track 类型 → 分类（已支持/待改造/离屏不可用）；每类至少一个 fixture 用例进 C1 矩阵 | T1.4 | ⬜ | 清单文档 + 用例 | v9.6 立账。实证：CpuFreqTrack 缺 whenDataReady 导致窄窗口整条空白（UI 未加载过的窗口数据 bounds 与离屏窗口不匹配，数据点全部落在画布外）——已按 counter_track 同构模式修复（共享 options builder 保证 use/waitFor 键一致），但同类风险在其他 track 类型上未盘点 |
+| T1.16 | workspace 时序竞争防护（traceInfo 就绪 ≠ defaultWorkspace 树建完；过早调用 renderTimelineImage 会报 no renderable tracks） | renderTimelineImage 在 workspace 空时等待（有限预算）或返回 WORKSPACE_NOT_READY warning，而非误报 missing | T1.7 | ⬜ | 修复 + 用例 | v9.6 立账。实证：偶发 missing 全部所请求 URI（Playwright waitForFunction 等 /thread_7303 出现后稳定）；测试脚本侧已规避，API 侧未防护 |
 | T1.11 | locale 确定性验证（时间轴 label 格式化路径） | 确认/强制 root locale，跨机 diff 稳定 | T1.9 | ✅ | 源码核查记录 | 结论：**当前离屏输出（网格线，无刻度 label）locale 无关、确定性成立**；Timecode 核心是纯 toString/padStart。两处 `toLocaleString()` 隐患已定位并挂账：`time.ts` duration 格式化、`time_axis_panel.ts:90/165`（时间轴 label）——**includeTimeAxis 落地时（C1 组件矩阵）必须在该路径强制固定 locale**（en-US 或 raw string），已写入 D7 对策备注 |
 | T1.12 | metatrace 埋点接入（traceEventBegin/End，事件名按 §6.5 约定） | 导出的 metatrace 含 warmUp/barrier/draw/encode 分段时间线，与 result.perf 交叉验证一致 | T1.6, T1.7 | ✅ | commit pr1-timeline-image | §6.5；traceEvent API 首个消费者：事件 TimelineImage.warmUp/draw/e2e（round 入 args）；`TimelineImageResult.perf` 四段（load/draw/encode/elapsed）入 public API 并有 spec 断言；barrier 并入 warmUp 轮次计时 |
 
