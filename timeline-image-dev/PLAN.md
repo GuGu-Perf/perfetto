@@ -9,7 +9,7 @@
 ## 0. TL;DR
 
 - **问题**：性能开发人员需要把 jank 时间段的 SF/RenderThread 等 track pin 到顶部并导出图像嵌入报告；现有 Playwright 外部操控方案脆弱、慢、无法精确控制渲染内容。
-- **方案**：在 perfetto UI 源码内新增三层能力——Timeline 插件内的离屏渲染器（L1）、`trace.renderTimelineImage()` public API（L2）、postMessage/Command/MCP 三个调用入口（L3）。输出是全新合成的画布，页面组件（侧栏/底栏/弹窗）从不参与绘制，"隐藏"是设计保证。
+- **方案**：在 perfetto UI 源码内新增三层能力——Timeline 插件内的离屏渲染器（L1）、`trace.timelineImage.renderTimelineImage()` public API（L2，6 参数终版 ADR-18）、postMessage 唯一进程外入口 + listTracks 发现消息（L3；Command/MCP 经 ADR-14/15 砍除）。输出是全新合成的画布，页面组件（侧栏/底栏/弹窗）从不参与绘制，"隐藏"是设计保证。
 - **可行性依据**：渲染层纯数值驱动（track 高度无 DOM 测量、绘制同步、TimeScale 纯函数）；数据量与像素数成正比而与 trace 大小无关（mipmap 分桶）。关键源码事实均经逐条核验（§1.3）。
 - **交付**：3 个独立可合入的 PR（§7），首个 PR 完成即可在控制台一行出图。
 - **成功指标**：替代 Playwright 流水线（单图耗时减半、零 DOM 依赖、与用户所见同像素）（§1.4）。
@@ -498,6 +498,9 @@ interface TimelineImageBudget {
 
 ### 6.4 验收基准与 CI 看护
 
+> **状态（v9.39/ADR-19）**：CI 看护与计时/内存断言已废除（理由见 ADR-19）；性能数据由 golden runner 的 metadata perf 字段持续记录（趋势账本）。本节保留为历史设计参考，其中"非纯色断言"与"边界 slice 断言"已由 A1/A2 spec 常态化执行。
+
+
 全部以"实际渲染的 track 数"为口径（与 slice 总数无关，mipmap 保护）：
 
 - 典型 jank 场景（≤10 track、2400px、1s 窗口）：冷缓存 ≤ 5s（CI 机器放宽 ×2；显式 `queryBounds` 生效，冷查询数据量 1x 而非 3x）；
@@ -689,6 +692,7 @@ trace.pftrace
 | 16 | **项目边界定案：只开发 perfetto 源码（截图 API 本体），源码无关的一切功能放弃**——调用方基建全线出界（T3.5 渲染服务 ❌、T3.6 MCP 适配器 ❌；§8 部署运维章降级为设计参考不再执行）；进程外入口唯一=postMessage | 用户明确定界："我们当前只开发 perfetto 源码，实现截图 api，和源码无关的任何功能都放弃"。ADR-15 的消费者路线随之关闭；demo 脚本/golden 基线作为测试资产保留，不新增消费者工具 | v9.34 |
 | 17 | **L2 参数面定稿（最小面）**：选择器唯一=`trackUris`（列表顺序=渲染顺序，pin/trackNames/正则全部出局，未匹配 uri 显式 reject）；尺寸族=`widthPx`(默认 1920) XOR `aspectRatio` + 可选 `heightPx`（精确画布高：不足留白/超出截断+TRUNCATED）；发现接口=新增 `listTracks` postMessage 只读消息（workspace 全树扁平化，与官方 FindTrackByName 同源数据），调用方自行过滤 | 用户三连质询定形：①"同名/复用 tid 会误 pin"（实测 39 命中歧义）②"真实调用方持有 utid，名称/正则/排序皆冗余"③"uri 是拼装数据结构，用户如何映射 UI 组件"。深入源码核验：uri 体系为各插件私有拼接约定（`/thread_<utid>`、`/process_<upid>/thread_<utid>_state`、`/slice_<trackId>`、组节点无 uri），SQL 表才是稳定契约；官方接口演进学习（commands/宏/extension servers/MCP 五层全景）确认图像输出为空白地带、postMessage 是唯一数据出口、listTracks 有 FindTrackByName 同源先例 | v9.37 |
 | 18 | **参数面终版：11→6**。删除 perTrackTimeoutMs/dataResolutionScale/includeTrackShell/includeTimeAxis（内部定值：超时 20s/数据 0.5/装饰恒开——时间线图像的定义包含名称列与时间轴）；删除 aspectRatio（可无代价两段式重建：高度与宽度无关，先渲染读 height 再按 ratio 定 widthPx，golden G-E1 实证逐字节等价）。保留 6 参数：trackUris（必填）/timeSpan（缺省=全 trace，无状态化 H2a）/widthPx（1920）/heightPx/devicePixelRatio（2）/format。同步修复 H1：组 uri（headless/isSummary/有子节点）统一展开到 leaf（原 `/process_<upid>` 返回无渲染器组节点，行为未定义）。对标业界（Puppeteer/Playwright screenshot：仅几何+格式+缩放三类产物规格，零内部旋钮） | 用户两轮质询（"这些参数全必要吗""perTrackTimeoutMs 应固定在代码里吧"）+ 业界对照定案；API 表面积原则=只暴露产物规格，内部工程参数定值 | v9.38 |
+| 19 | **T3.4 性能验收/CI 看护砍除**。性能守护=golden metadata 的 perf 趋势账本（每次 run 自动记录）+ 既有测试超时兜底；不做 CI 时间软阈值/hover 干扰基准/内存断言 | 原假设=性能承诺需机器看护防劣化；证据=调用方已是 headless 批量（hover 场景消亡）、GitHub runner 计时噪音大（像素测试已 flaky，时间断言更甚）、浏览器内存断言不可靠、趋势数据已免费存在；替代路径=golden perf 记录 + A1/A2 功能级断言继续有效 | v9.39 |
 
 ## 附录 C：修订史
 
@@ -714,6 +718,7 @@ trace.pftrace
 | v9.17 | 08-23 | T1.23 护栏协商（dpr 自动降级） |
 | v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
 | v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
+| v9.39 | 08-24 | **T3.4 ❌（ADR-19）+ 全量代码 review + 文档同步**。性能验收砍除后源码侧任务清零；review 发现并修复渲染器三处陈旧注释（heightPx 缺省语义/width-aspectRatio 互斥/数据分辨率措辞——均已随 ADR-18 失效）；README/SMOKE/TL;DR/里程碑表同步终版状态；§6.4 加废除横幅。特性开发收官：L1+L2+listTracks/render 两消息全交付，验证链 vitest 2569/Playwright 19/19/golden 双 MATCH/CI 绿 |
 | v9.38 | 08-23 | **ADR-18 落地：参数面 11→6 + H1/H2 修复 + 全链路迁移**。渲染器删默认集合路径（trackNodes/collectDefaultTrackNodes/2160 cap/TRUNCATED 默认语义）与五个内部旋钮（内部定值超时 20s/数据分辨率 0.5/装饰恒开）；adapter 强制 trackUris 必填 + timeSpan 缺省改全 trace（无状态）；组 uri 展开统一（process/thread/summary 组到 leaf）。测试迁移：C1 改装饰恒在断言、G1/G2 重写（显式发现列表 vs UI 叶序对齐 + 堆叠连续性；组展开省略 18px 标题行致 DOM y 全等不再成立，如实降级为序断言）、A1 采样改上四分之一行（贯穿长帧中线行为纯色是正确行为）+ actual track 优先、synthetic 默认集合改显式 /process_1。工具迁移：golden G-DEFAULT 删除、G-E1 两段式 4:3、smoke S1 删除。验证全绿：vitest 2569、tsc/eslint 0、Playwright 19/19、golden G-STD/G-E1 BASELINE MATCH（两段式逐字节等价实证）、smoke 六 fixture tuned 全绿。文档同步（walkthrough/embedding reference：必填化+缺省表+装饰恒开说明） |
 | v9.37 | 08-23 | **ADR-17 落地：L2 参数面最小化 + listTracks 发现接口**。删除 trackNames/pinTracks（名称歧义实测 39 命中、tid 复用不可消歧、显式列表自带排序）；渲染器未知 uri 显式 reject；`heightPx` 精确画布高（留白/截断+TRUNCATED，缺省文档化：width 1920）；postMessage 新增 `listTracks`（60s 挂起同 render、毫秒级、workspace 全树含无 uri 组节点）。官方文档同步改写（embedding-api-reference 新节 + walkthrough 选择/尺寸节重写 + `/state_<id>` 错误更正为 `/process_<upid>/thread_<utid>_state`）。验证全绿：vitest 2571、tsc 0、eslint 0、Playwright timeline_image 19/19（含 heightPx 留白/截断、listTracks 往返、线程组展开、未知 uri 拒绝）、golden G-STD/G-E1 BASELINE MATCH（pin→列表顺序迁移逐字节等价，无需 rebaseline）。T3.3 trackNamePatterns ❌（正则出局）；官方接口演进全景学习结论附 D.5 |
 | v9.36 | 08-23 | **T3.7 收口：全场景回归 + rebaseline 流程**。源码补齐参数边界组缺口（§6.3 行 1）——渲染器拒绝零宽/反转 timeSpan（原为 NaN TimeScale 静默空白图）、入口层拒绝全越界 span、pinTracks 未渲染 uri 由静默过滤改为 TRACK_NOT_RENDERED warning（兑现公共 API 文档承诺）；新增并发双请求字节一致用例（§6.3 行 3 挂账项）。验证：vitest 2570 全绿、tsc 零错、eslint 清零、Playwright timeline_image 17/17（13 旧 + 4 新）全绿。rebaseline 三步判定流程（归因→定性→独立 commit 留痕）写入 D.4，实现/基线解耦原则固化。八组矩阵至此全部 ✅（含此前 v9.28 盘点的四项"待补"） |
@@ -769,9 +774,9 @@ trace.pftrace
 |---|---|---|---|---|
 | M0 | feature issue 与维护者对齐 | issue 建立、接口增量获初步反馈、instanceof 白名单备选二选一有结论、feature flag 门控偏好有结论 | ⏸ 暂缓（开发验证阶段先行，见文首阶段声明） | issue 链接：— |
 | M1a = PR 0 | 纯重构前置（提取绘制序列） | 官方像素基线无 diff | ✅（v9.35 状态勘误：实际早已随 T0.3 完成——commit 405baaef7a，提取物=timeline_canvas_renderer.ts，离屏渲染器已在消费；当时验收 A/B 字节一致） | commit 405baaef7a |
-| M1 = PR 1 | L1+L2 原语（依赖 PR 0） | 单测全绿；A2 全链路像素基线入库；§6.4 断言全过；接口变更声明+插件文档 | ⬜ | PR：— |
-| M2 = PR 2 | postMessage 入口 | §6.3 协议组全绿；Blob 校验；进度节流；协议文档更新 | ⬜ | PR：— |
-| M3 = PR 3 | 入口完备性+性能收尾 | §6.4 验收基准全量通过并固化为 CI 看护；八组用例全绿；渲染服务样板跑通 5 fixture | ⬜ | PR：— |
+| M1 = PR 1 | L1+L2 原语（依赖 PR 0） | 单测全绿；A2 全链路像素基线入库；断言全过；接口变更声明+插件文档 | ✅（本分支全部交付，PR 未开——上游提交待 M0 决策） | 本分支 commits（405baaef7a 起全部 feature commits） |
+| M2 = PR 2 | postMessage 入口 | §6.3 协议组全绿；Blob→ArrayBuffer 校验；协议文档更新 | ✅（本分支交付；进度节流未做——批量调用方无进度消费需求，ADR-18 精简精神） | 本分支 commits + docs/visualization/embedding-api-reference.md |
+| M3 = PR 3 | 入口完备性+性能收尾 | ~~§6.4 验收基准全量通过并固化为 CI 看护；八组用例全绿；渲染服务样板跑通 5 fixture~~ | ❌（范围收敛：Command/MCP/渲染服务经 ADR-14/15/16 砍除；八组用例已由 T3.7 ✅ 承接；性能看护经 ADR-19 砍除） | — |
 
 ### D.2 任务表
 
@@ -833,7 +838,7 @@ trace.pftrace
 | T3.2 | ~~MCP tool：PerfettoMcp ToolRegistry 注册 render-timeline-image~~ | ~~/aichat 内 LLM 调工具返回内联 PNG~~ | M1 | ❌ | — | v9.33/ADR-15：原假设=内置聊天需要出图工具；证据=模型经 functionResponse 只收文本看不到图，人看实时 UI 用既有 show-timeline 更直接；替代路径=T3.6 调用方 MCP 适配器 |
 | T3.6 | ~~调用方 MCP 适配器 tools/mcp-server.mjs~~ | ~~MCP 宿主实测批量出图~~ | T2.3 | ❌ | — | v9.34/ADR-16：原假设=自用需要 MCP 消费端；证据=用户边界决策"只开发 perfetto 源码，源码无关功能全放弃"；替代路径=需要时用 postmessage-demo.mjs 或自行基于公开 embedding 协议实现（协议文档已交付） |
 | T3.3 | ~~trackNamePatterns~~ | ~~按名选 track~~ | M1 | ❌ | — | v9.37/ADR-17：原假设=调用方需模糊按名选择；证据=名称层歧义（同名 39 命中/tid 复用不可消歧），真实调用方持有 utid，正则属人类交互层（官方仅用于命令面板弹框）；替代路径=trackUris 精确选择 + listTracks 发现 + SQL 取 id |
-| T3.4 | 性能验收 + CI 看护固化 | §6.4 基准全过；软阈值（×2 告警/×3 阻断）入库 | M1 | ⬜ | CI 配置 | |
+| T3.4 | ~~性能验收 + CI 看护固化~~ | ~~§6.4 基准全过；软阈值入库~~ | M1 | ❌ | — | v9.39/ADR-19：原假设/证据/替代路径见 ADR-19；perf 趋势由 golden metadata 账本承接 |
 | T3.5 | ~~渲染服务样板（长驻 headless + §8.2 流水线）~~ | ~~5 fixture 批量出图成功~~ | T2.3 | ❌ | — | v9.34/ADR-16：同 T3.6，调用方基建出界；§8 部署运维章降级为设计参考不再执行 |
 | T3.7 | 全场景回归 + rebaseline 判定流程落地 | 八组用例全绿；rebaseline 规则写入贡献文档 | T3.4 | ✅ | commit（本分支） | v9.36 收口：参数边界补齐（零宽/反转 span 拒绝、全越界拒绝、pin 未渲染 → TRACK_NOT_RENDERED——原为静默过滤违例）+ 并发双请求字节一致用例；vitest 2570 绿 + Playwright timeline_image 17/17 绿；rebaseline 三步判定流程入 D.4 |
 
@@ -871,6 +876,7 @@ trace.pftrace
 
 | 日期 | 主体 | 叙事与指针 |
 |---|---|---|
+| 08-24 | 收官 review (ADR-19) | 用户指令"砍掉 T3.4 + 全面 review + 更新文档"。代码 review：manager/public/adapter/renderer/post_message_handler 五文件全读——manager 与 public 干净；renderer 三处陈旧注释修复（ADR-18 后失效的 heightPx 默认上限描述、width/aspectRatio 互斥、dataResolutionScale 措辞）；无死代码残留（nodeHeight/collectDefaultTrackNodes/resolveTrackNames 已随前几轮删除）。文档同步：README（冒烟现状+API 终版速览）、SMOKE（S1 废除横幅已置）、PLAN（TL;DR/§6.4/里程碑/任务表）。源码任务清单清零 |
 | 08-23 | ADR-18 落地 | 用户两轮参数面拷问（11 参数逐个必要性→业界基准对照）驱动终版收缩：内部旋钮定值（超时 20s/数据 0.5/装饰恒开）、aspectRatio 删（两段式重建，golden 实证等价）、组 uri 展开统一修复 `/process_<upid>` 未定义行为、timeSpan 缺省无状态化。迁移中三处测试语义修正均为契约变化的诚实反映：A1 纯色=贯穿帧正确行为（采样行改上 1/4）、G2 DOM y 全等让位序断言（组展开无标题行）、G1 虚拟化过滤。golden 双场景 MATCH 证明参数面收缩零像素漂移 |
 | 08-23 | ADR-17 落地 | 用户质询链：误 pin 场景（同名/tid 复用/同线程多能力 track）→ 实测 39 命中歧义 → "为什么正则"→"trackNames/pinTracks 也不必要"→"uri 如何映射 UI 组件"→"官方接口演进全景"。源码核验：uri 体系=各插件私有拼接（ProcessThreadGroups `/thread_<utid>`、Sched `getThreadUriPrefix(upid,utid)_state`、TPTrack `/slice_<id>`、CPU 组节点无 uri）；官方五层接口全景（URL 深链/postMessage/commands+宏/startup allowlist/extension servers/PerfettoMcp），结论：图像输出空白地带、postMessage 唯一数据出口、FindTrackByName 的 flatTracksOrdered+选择器是 listTracks 同源先例、命令系统是自动化统一面（命令位挂账可选）。落地：参数面砍至 trackUris+timeSpan+尺寸族（widthPx 默认 1920/heightPx 精确画布高/aspectRatio 保留）、未知 uri reject、listTracks 消息；文档修正 `/state_<id>` 错误；golden G-STD/G-E1 MATCH 证明迁移零像素漂移。流程教训：中途被用户拦停"方案未敲定先写代码"——已纠正为先评估后实施 |
 | 08-23 | 边界定案 (ADR-16) | 用户明示边界："只开发 perfetto 源码，实现截图 api，和源码无关的任何功能都放弃"。MCP 消费者路线（v9.33 刚立的 T3.6）即时关闭，连同 T3.5 渲染服务一并 ❌；§8 部署运维章降级为设计参考。入口层经 ADR-14/15/16 三连修正收敛最简：进程外入口唯一=postMessage（已交付），L3 其余构想全部出局。剩余工作面=纯源码侧：T3.3 trackNamePatterns（按名选 track 的源码参数）、T3.4 性能验收+CI 看护、T3.7 全场景回归+rebaseline 流程、M1a PR 0 重构前置 |

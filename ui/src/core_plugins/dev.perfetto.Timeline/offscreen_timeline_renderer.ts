@@ -28,9 +28,9 @@
  * Session-bound visuals (hover markers, notes, selection, overlays, flows)
  * are not drawn, producing deterministic output.
  *
- * Data resolution is decoupled from the canvas resolution by default: data is
- * fetched at `dataResolutionScale` (0.5) of the canvas resolution, i.e. 1x
- * data on a 2x (dpr) canvas.
+ * Data resolution is decoupled from the canvas resolution: data is fetched
+ * at half the canvas resolution (1x data on the default 2x canvas), a fixed
+ * internal choice.
  */
 
 import {Rect2D} from '../../base/geom';
@@ -101,17 +101,11 @@ export interface OffscreenTimelineRenderOptions {
   // `axis + sum(track heights)`; when this is shorter the remainder is
   // background padding (deterministic output for report grids); when it is
   // taller the content is clipped and the result carries a TRUNCATED
-  // warning. Without it the canvas is exactly as tall as the content
-  // (zero-config default collection is capped at DEFAULT_MAX_HEIGHT_PX
-  // instead).
+  // warning. Without it the canvas is exactly as tall as the content.
   readonly heightPx?: number;
   readonly timeSpan: HighPrecisionTimeSpan;
-  // Width of the produced image in CSS pixels. Mutually exclusive with
-  // `aspectRatio`; when neither is given the width defaults to 1920.
+  // Width of the produced image in CSS pixels. Default: 1920.
   readonly widthPx?: number;
-  // Target width/height ratio; the width becomes round(height * ratio),
-  // where the height derives from the track set. Mutually exclusive with
-  // `widthPx`.
   // Device pixel ratio of the produced canvas. Default: 2.
   readonly devicePixelRatio?: number;
   // Data is fetched at this fraction of the canvas resolution (power-of-two

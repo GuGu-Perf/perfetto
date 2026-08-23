@@ -3,7 +3,7 @@
 | 内容 | 链接 |
 |---|---|
 | 设计与执行总文档（API 设计/难点/性能/测试/任务表/执行日志） | [PLAN.md](PLAN.md) |
-| 冒烟结果表（最近一轮 12/12 通过） | [tools/SMOKE.md](tools/SMOKE.md) |
+| 冒烟结果表（S2 六 fixture 通过；S1 零参数已随 ADR-18 废除） | [tools/SMOKE.md](tools/SMOKE.md) |
 | 测试报告（金字塔现状+关键数据+代表截图） | [tools/TEST-REPORT.md](tools/TEST-REPORT.md) |
 | 黄金场景 runner | [tools/run-golden.mjs](tools/run-golden.mjs) |
 | 冻结基线（序列+像素双硬断言） | [tools/baselines/](tools/baselines/) |
@@ -27,8 +27,10 @@
 
 日常使用：
 ```sh
-node timeline-image-dev/tools/run-golden.mjs G-STD   # 黄金场景+基线验证
-node timeline-image-dev/tools/smoke.mjs              # 冒烟一轮
+node timeline-image-dev/tools/run-golden.mjs G-STD   # 黄金场景+基线验证（冻结集：G-STD / G-E1）
+node timeline-image-dev/tools/smoke.mjs              # 冒烟一轮（六 fixture，tuned 场景）
 node timeline-image-dev/tools/prune-artifacts.mjs    # 清理旧结果
 open timeline-image-dev/results/REPORT-ASSETS/       # 看截图
 ```
+
+**API 终版速览（ADR-18，2026-08-24 冻结）**：`renderTimelineImage({trackUris 必填, timeSpan?=全 trace, widthPx?=1920, heightPx?, devicePixelRatio?=2, format?=png})`；选择即显式（列表顺序=渲染顺序，组 uri 展开 leaf，未知 uri reject）；发现用 `listTracks` 消息。参数面/入口收敛的完整决策链见 PLAN.md ADR-14~19。
