@@ -136,7 +136,7 @@ async function main() {
   // ---- baseline discipline (plan v9.13): expectations are frozen files.
   // A change of implementation must NOT silently change expectations;
   // updating a baseline is an explicit, reviewable act.
-  const baselinePath = `${ROOT}tools/timeline-image/baselines/${scenarioName}.json`;
+  const baselinePath = `${ROOT}timeline-image-dev/tools/baselines/${scenarioName}.json`;
   const fingerprint = (r) => JSON.stringify({
     width: r.width, height: r.height, warnings: r.warnings,
     tracks: r.tracks.map((t) => [t.name, t.uri, t.h, t.depth, t.group]),
