@@ -53,6 +53,18 @@ export interface TimelineImageOptions {
    */
   readonly dataResolutionScale?: number;
   /**
+   * Draw the track shell column (track names, indentation) on the left, as
+   * the interactive timeline does. Default: true. Part of the image is a
+   * canvas-drawn simplification of the DOM shell (no expand arrows or hover
+   * affordances).
+   */
+  readonly includeTrackShell?: boolean;
+  /**
+   * Draw the time axis row (ticks + locale-independent timecode labels)
+   * above the tracks. Default: true.
+   */
+  readonly includeTimeAxis?: boolean;
+  /**
    * Per-track data loading budget in milliseconds. Tracks which do not
    * settle in time are drawn as-is and reported via warnings/timeouts.
    * Default: 5000.
@@ -72,6 +84,8 @@ export interface TimelineImageTrackBox {
   readonly name: string;
   readonly top: number;
   readonly height: number;
+  /** Nesting depth in the workspace tree (0 = top level), for indentation. */
+  readonly depth: number;
 }
 
 export interface TimelineImageResult {

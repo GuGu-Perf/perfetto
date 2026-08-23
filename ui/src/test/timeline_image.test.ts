@@ -259,6 +259,10 @@ test.describe.serial('timeline image rendering', () => {
         timeSpan,
         widthPx: 1200,
         perTrackTimeoutMs: 20_000,
+        // Pure content canvas: this test asserts on the leftmost pixels of
+        // the timeline area, which the (default) shell column would occupy.
+        includeTrackShell: false,
+        includeTimeAxis: false,
       });
       // Sample the left 5% of each track band: the 62.7ms worst frame starts
       // before the window and spans its left edge, so the left edge of the
@@ -310,5 +314,70 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.warnings).toEqual([]);
     expect(result.width).toBe(1600);
     expect(result.height).toBeGreaterThan(0);
+  });
+
+  test('C1: default shell + time axis decorations', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      const common = {
+        trackUris: ['/sched_cpu0'],
+        timeSpan,
+        widthPx: 1200,
+        perTrackTimeoutMs: 20_000,
+      };
+      const withDecorations = await trace.timelineImage.renderTimelineImage(
+        common,
+      );
+      const bare = await trace.timelineImage.renderTimelineImage({
+        ...common,
+        includeTrackShell: false,
+        includeTimeAxis: false,
+      });
+      const sampleRegion = async (r: Awaited<
+        ReturnType<typeof trace.timelineImage.renderTimelineImage>
+      >) => {
+        const bmp = await createImageBitmap(r.blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bmp.width;
+        canvas.height = bmp.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(bmp, 0, 0);
+        const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const dpr = canvas.width / r.width;
+        const colors = new Set<string>();
+        return (x0: number, y0: number, x1: number, y1: number) => {
+          for (let y = Math.floor(y0 * dpr); y < Math.ceil(y1 * dpr); y++) {
+            for (let x = Math.floor(x0 * dpr); x < Math.ceil(x1 * dpr); x++) {
+              const i = (y * canvas.width + x) * 4;
+              colors.add(`${d[i]},${d[i+1]},${d[i+2]}`);
+            }
+          }
+          const size = colors.size;
+          colors.clear();
+          return size;
+        };
+      };
+      const sample = await sampleRegion(withDecorations);
+      const firstBox = withDecorations.trackBoxes[0];
+      return {
+        warnings: [...withDecorations.warnings],
+        heightDelta: withDecorations.height - bare.height,
+        trackDepth: firstBox?.depth,
+        // Shell column strip (left of the track band) must contain text
+        // pixels, i.e. more than a flat background color.
+        shellColors: sample(0, firstBox!.top, 240, firstBox!.top + firstBox!.height),
+        // Time axis row must contain tick/label pixels.
+        axisColors: sample(250, 0, 1200, 22),
+      };
+    }, A1_WINDOW);
+    // 22px time axis row accounts for the height difference.
+    expect(result.heightDelta).toBe(22);
+    expect(result.warnings).toEqual([]);
+    // Depth is fixture-dependent (top-level group vs direct child); it only
+    // needs to be present and non-negative.
+    expect(result.trackDepth).toBeGreaterThanOrEqual(0);
+    expect(result.shellColors).toBeGreaterThan(2);
+    expect(result.axisColors).toBeGreaterThan(2);
   });
 });

@@ -37,16 +37,25 @@ import {Rect2D} from '../../base/geom';
 import type {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
 import {calculateResolution} from '../../base/resolution';
 import {TimeScale} from '../../base/time_scale';
-import type {duration} from '../../base/time';
+import {Time, type duration} from '../../base/time';
 import type {TrackRenderContext} from '../../public/track';
 import {TrackNode} from '../../public/workspace';
 import type {TraceImpl} from '../../core/trace_impl';
 import {Canvas2DRenderer} from '../../base/canvas2d_renderer';
 import {WebGLRenderer} from '../../base/gl/webgl_renderer';
 import type {Renderer} from '../../base/renderer';
-import {COLOR_BACKGROUND} from '../../frontend/css_constants';
+import {
+  COLOR_BACKGROUND,
+  COLOR_BACKGROUND_SECONDARY,
+  COLOR_BORDER,
+  COLOR_TEXT,
+  COLOR_TEXT_MUTED,
+  FONT_COMPACT,
+  TRACK_SHELL_WIDTH,
+} from '../../frontend/css_constants';
 import {traceEvent} from '../../core/metatracing';
 import {TrackView} from './track_view';
+import {generateTicks, getMaxMajorTicks, TickType} from './gridline_helper';
 import {
   getDefaultCanvasColors,
   renderTimelineCanvas,
@@ -62,6 +71,13 @@ const MAX_CANVAS_AREA_PX = 32_000_000;
 // wait for second-order queries, so a small cap keeps the worst case within
 // the "one minute per image" service budget (plan §1.4).
 const SECOND_ROUND_BUDGET_MS = 5_000;
+
+// Visual constants, kept in sync with the interactive timeline panels.
+// TimeAxisPanel.height is 22; per-level shell indentation mirrors the
+// --depth indirection in track_shell.scss.
+const TIME_AXIS_HEIGHT_PX = 22;
+const SHELL_INDENT_PX = 12;
+const SHELL_FONT = `12px ${FONT_COMPACT}`;
 
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
@@ -82,6 +98,12 @@ export interface OffscreenTimelineRenderOptions {
   // Maximum number of warm-up/draw rounds (fixed point for data-dependent
   // second-order queries). Default: 3.
   readonly maxRounds?: number;
+  // Draw the track shell column (names, indentation) on the left, mirroring
+  // the interactive timeline's track shell. Default: true.
+  readonly includeTrackShell?: boolean;
+  // Draw the time axis row (ticks + timecode labels, locale-independent)
+  // above the tracks. Default: true.
+  readonly includeTimeAxis?: boolean;
 }
 
 export interface OffscreenTimelineRenderOutput {
@@ -90,12 +112,14 @@ export interface OffscreenTimelineRenderOutput {
   readonly width: number;
   readonly height: number;
   // Bounding boxes of the rendered tracks, in CSS pixels relative to the
-  // top-left of the canvas.
+  // top-left of the canvas (i.e. including the time axis row when drawn).
   readonly trackBoxes: ReadonlyArray<{
     uri: string;
     name: string;
     top: number;
     height: number;
+    // Nesting depth in the workspace tree, used for shell indentation.
+    depth: number;
   }>;
   // Tracks whose data did not become ready within the per-track budget.
   readonly timedOutTracks: readonly string[];
@@ -117,14 +141,26 @@ export async function renderOffscreenTimeline(
     dataResolutionScale = 0.5,
     perTrackTimeoutMs = 5_000,
     maxRounds = 3,
+    includeTrackShell = true,
+    includeTimeAxis = true,
   } = options;
 
   // ------------------------------------------------------------------ layout
+  const shellWidth = includeTrackShell ? TRACK_SHELL_WIDTH : 0;
+  const axisHeight = includeTimeAxis ? TIME_AXIS_HEIGHT_PX : 0;
+  const uriDepth = buildUriDepthMap(trace.defaultWorkspace.tracks);
   const trackViews: TrackView[] = [];
-  const trackBoxes: {uri: string; name: string; top: number; height: number}[] =
-    [];
+  const trackBoxes: {
+    uri: string;
+    name: string;
+    top: number;
+    height: number;
+    depth: number;
+  }[] = [];
   const missingTracks: string[] = [];
-  let top = 0;
+  // Track vertical bounds are canvas-absolute: they start below the time
+  // axis row, as TrackView.drawCanvas places tracks at verticalBounds.top.
+  let top = axisHeight;
   for (const uri of trackUris) {
     // Headless nodes are grouping containers (e.g. a thread node holding its
     // slice & state tracks); expand them so the requested tracks actually
@@ -134,14 +170,18 @@ export async function renderOffscreenTimeline(
       missingTracks.push(uri);
       continue;
     }
+    const requestDepth = uriDepth.get(uri) ?? 0;
     for (const node of nodes) {
       const view = new TrackView(trace, node, top, false);
       trackViews.push(view);
+      const nodeUri = node.uri ?? uri;
       trackBoxes.push({
-        uri: node.uri ?? uri,
+        uri: nodeUri,
         name: node.name,
         top,
         height: view.height,
+        // Expanded descendants render one level deeper than the request.
+        depth: uriDepth.get(nodeUri) ?? requestDepth + 1,
       });
       top += view.height;
     }
@@ -200,19 +240,25 @@ export async function renderOffscreenTimeline(
   );
 
   const colors = getDefaultCanvasColors();
+  // The timeline occupies the area right of the shell column and below the
+  // time axis row; decorations fill the remaining strips afterwards.
   const timelineRect = new Rect2D({
-    left: 0,
-    top: 0,
+    left: shellWidth,
+    top: axisHeight,
     right: cssWidth,
     bottom: cssHeight,
   });
-  const timescale = new TimeScale(timeSpan, timelineRect);
+  const timescale = new TimeScale(timeSpan, {
+    left: shellWidth,
+    right: cssWidth,
+  });
 
   const timedOutTracks: string[] = [];
   const renderContexts = new Map<TrackView, TrackRenderContext>();
   for (const view of trackViews) {
+    // verticalBounds are already canvas-absolute (they include axisHeight).
     const trackRect = new Rect2D({
-      left: 0,
+      left: shellWidth,
       top: view.verticalBounds.top,
       right: cssWidth,
       bottom: view.verticalBounds.bottom,
@@ -225,7 +271,7 @@ export async function renderOffscreenTimeline(
       resolution,
       queryBounds: timeSpan.toTimeSpan(),
       ctx: d2Ctx,
-      timescale: new TimeScale(timeSpan, {left: 0, right: cssWidth}),
+      timescale: new TimeScale(timeSpan, {left: shellWidth, right: cssWidth}),
       colors,
       renderer,
     });
@@ -366,6 +412,26 @@ export async function renderOffscreenTimeline(
       includeGrid: true,
       includeSessionOverlays: false,
     });
+    // Decorations are drawn after the timeline content, in the same CSS
+    // coordinate space (the dpr transform above applies to the 2D ctx too).
+    // Opaque backgrounds also clip any gridline overdraw into their strips.
+    if (includeTrackShell) {
+      drawTrackShell(d2Ctx, trackBoxes, {
+        shellWidth,
+        axisHeight,
+        cssHeight,
+      });
+    }
+    if (includeTimeAxis) {
+      drawTimeAxis(d2Ctx, {
+        trace,
+        timeSpan,
+        timescale,
+        cssWidth,
+        axisHeight,
+        shellWidth,
+      });
+    }
     if (glCtx) {
       glCtx.flush();
     }
@@ -438,6 +504,126 @@ function resolveRenderableTrackNodes(
   };
   collect(node);
   return descendants;
+}
+
+/**
+ * Map every track URI in the workspace to its tree depth (direct children of
+ * the root are depth 0), used for shell indentation offscreen.
+ */
+function buildUriDepthMap(root: TrackNode): Map<string, number> {
+  const map = new Map<string, number>();
+  const walk = (node: TrackNode, depth: number) => {
+    if (node.uri !== undefined && !map.has(node.uri)) {
+      map.set(node.uri, depth);
+    }
+    for (const child of node.children) {
+      walk(child, depth + 1);
+    }
+  };
+  walk(root, -1); // The root container itself is not a track level.
+  return map;
+}
+
+function clipText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string {
+  if (maxWidth <= 4) return '';
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let out = text;
+  while (out.length > 0 && ctx.measureText(`${out}…`).width > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return out.length > 0 ? `${out}…` : '';
+}
+
+/**
+ * Track shell column: names indented by workspace depth, one line per track,
+ * with row separators. A canvas-drawn simplification of the interactive
+ * DOM shell (no expand arrows or hover affordances).
+ */
+function drawTrackShell(
+  ctx: CanvasRenderingContext2D,
+  boxes: ReadonlyArray<{
+    name: string;
+    top: number;
+    height: number;
+    depth: number;
+  }>,
+  opts: {shellWidth: number; axisHeight: number; cssHeight: number},
+): void {
+  const {shellWidth, axisHeight, cssHeight} = opts;
+  ctx.save();
+  ctx.fillStyle = COLOR_BACKGROUND_SECONDARY;
+  ctx.fillRect(0, axisHeight, shellWidth, cssHeight - axisHeight);
+  ctx.fillStyle = COLOR_BORDER;
+  ctx.fillRect(shellWidth - 1, axisHeight, 1, cssHeight - axisHeight);
+  ctx.font = SHELL_FONT;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (const box of boxes) {
+    const x = 8 + Math.max(0, box.depth) * SHELL_INDENT_PX;
+    ctx.fillStyle = COLOR_TEXT;
+    ctx.fillText(
+      clipText(ctx, box.name, shellWidth - 8 - x),
+      x,
+      box.top + Math.min(box.height / 2, 9),
+    );
+    ctx.fillStyle = COLOR_BORDER;
+    ctx.fillRect(0, box.top + box.height - 1, shellWidth - 1, 1);
+  }
+  ctx.restore();
+}
+
+/**
+ * Time axis row: trace span summary on the left (over the shell column) and
+ * major ticks with two-line timecode labels over the content area, mirroring
+ * TimeAxisPanel. All formatting is locale-independent (timecode rendering
+ * only), keeping the output deterministic (plan T1.11).
+ */
+function drawTimeAxis(
+  ctx: CanvasRenderingContext2D,
+  opts: {
+    trace: TraceImpl;
+    timeSpan: HighPrecisionTimeSpan;
+    timescale: TimeScale;
+    cssWidth: number;
+    axisHeight: number;
+    shellWidth: number;
+  },
+): void {
+  const {trace, timeSpan, timescale, cssWidth, axisHeight, shellWidth} = opts;
+  ctx.save();
+  ctx.fillStyle = COLOR_BACKGROUND;
+  ctx.fillRect(0, 0, cssWidth, axisHeight);
+  ctx.font = `11px ${FONT_COMPACT}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const timespan = timeSpan.toTimeSpan();
+  ctx.fillStyle = COLOR_TEXT_MUTED;
+  const startTc = Time.toTimecode(timespan.start).toString(' ');
+  const durTc = Time.toTimecode(Time.fromRaw(timespan.duration)).toString(' ');
+  ctx.fillText(`Start: ${startTc}`, 6, 10, shellWidth - 12);
+  ctx.fillText(`Span: ${durTc}`, 6, 20, shellWidth - 12);
+
+  const contentWidth = cssWidth - shellWidth;
+  if (contentWidth > 0 && timespan.duration > 0n) {
+    const maxMajorTicks = getMaxMajorTicks(contentWidth);
+    const offset = trace.timeline.getTimeAxisOrigin();
+    for (const {type, time} of generateTicks(timespan, maxMajorTicks, offset)) {
+      if (type !== TickType.MAJOR) continue;
+      const px = Math.floor(timescale.timeToPx(time));
+      ctx.fillStyle = COLOR_BORDER;
+      ctx.fillRect(px, 0, 1, axisHeight);
+      const domain = trace.timeline.toDomainTime(time);
+      const tc = Time.toTimecode(domain);
+      ctx.fillStyle = COLOR_TEXT_MUTED;
+      ctx.fillText(tc.dhhmmss, px + 5, 10);
+      ctx.fillText(tc.subsec('\u2009'), px + 5, 20);
+    }
+  }
+  ctx.restore();
 }
 
 function findNodeByUri(node: TrackNode, uri: string): TrackNode | undefined {

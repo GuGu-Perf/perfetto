@@ -119,6 +119,8 @@ async function renderTimelineImageAdapter(
     devicePixelRatio: opts.devicePixelRatio,
     dataResolutionScale: opts.dataResolutionScale,
     perTrackTimeoutMs: opts.perTrackTimeoutMs,
+    includeTrackShell: opts.includeTrackShell,
+    includeTimeAxis: opts.includeTimeAxis,
   });
   return output;
 }
