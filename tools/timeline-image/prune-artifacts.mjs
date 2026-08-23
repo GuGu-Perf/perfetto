@@ -9,7 +9,7 @@ const DIR = ROOT + 'out/test-runs';
 const MAX_RUNS = 50;
 const MAX_AGE_DAYS = 30;
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
-const PINNED = ['LATEST.png', 'LATEST.json', '20260823-overlay-immunity'];
+const PINNED = ['LATEST.png', 'LATEST.json', '20260823-overlay-immunity', 'REPORT-ASSETS'];
 
 const entries = readdirSync(DIR, {withFileTypes: true})
   .filter((e) => !e.name.startsWith('.') && !PINNED.includes(e.name) && !e.name.startsWith('native-tp'));
