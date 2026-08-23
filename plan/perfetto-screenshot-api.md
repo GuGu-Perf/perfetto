@@ -705,6 +705,7 @@ trace.pftrace
 | v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
 | v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
 | v9.20 | 08-23 | 文档结构治理：修订史/任务表瘦身、D.5 执行日志新增、设计区与实现同步 |
+| v9.21 | 08-23 | T1.29 全量回归闭环：a) 修 6 文件格式/lint（全量验证即时显价值）；b) 干净全量 31 spec——13 过/timeline_image 9-9/39 失败 100% 像素基线 diff（环境性豁免，三重证据）/40 链式跳过；首轮 daemon 干扰识别并消除；c) 归因矩阵归档。**结论：无功能回归；像素类最终裁决待 Linux CI（T1.0）** |
 
 ## 附录 D：执行跟踪表（Execution Tracker）
 
@@ -777,7 +778,7 @@ trace.pftrace
 | T1.19 | webfont 时序：UI 字体是 woff2 + font-display:swap，离屏首渲染可能用 fallback 字形（破坏确定性与视觉一致） | renderOffscreenTimeline 开头 await document.fonts.ready | — | ✅ | commit | ✅ fonts.ready await（jsdom 守卫） |
 | T1.20 | GL context lost 未监听（webglcontextlost 事件；MAX_RENDERS_PER_CONTEXT=200 主动回收已覆盖主因，被动丢失无恢复路径） | 监听事件 → 立即重建共享表面 + warning 上报；复现场景难造（浏览器内存压力），可代码审查交付 | T1.6 | ⬜ | 修复 | 低概率高影响；200 次主动回收已覆盖主因 |
 | T1.21 | 确定性输入语义未文档化：workspace 状态（用户展开/折叠/pin/搜索）是隐式输入——显式 trackUris 不受影响，但默认收集与若干高度计算（isSummary&&expanded）读取实时状态，"同输入同输出"的"输入"须定义包含 workspace 状态 | API guarantee 节明确：显式 trackUris+timeSpan 下输出仅依赖这些参数；默认收集语义=调用瞬间的 workspace 快照（并文档警示） | — | ⬜ | 文档 | M2 协议文档前必须落（部分已入 §3.4 前置条件） |
-| T1.29 | **全量回归验证**（官方测试流程对照：Playwright 31 spec 此前仅跑 1，真死角） | (a) lint/format 零警告 (b) 31 spec 全量+fail 归因（环境性豁免带证据/引入即修） (c) 归因矩阵归档 | T1.9 | 🔵 | 回归报告 | 方案经用户 review 后执行；详见 D.5 08-23 条目；mac 本地≠Linux CI（像素基线），完全等价需 T1.0 |
+| T1.29 | **全量回归验证**（官方测试流程对照：Playwright 31 spec 此前仅跑 1，真死角） | (a) lint/format 零警告 (b) 31 spec 全量+fail 归因 (c) 归因矩阵归档 | T1.9 | ✅ | out/test-runs/2026-08-23T05-30-t1.29-full-regression | a) prettier×6+strict-boolean×3 修复后 rc 双 0；b) 干净全量 13 过/39 失败/40 链式跳过（3.3m）——**39/39=像素基线 diff（238 处对比、0 功能错误、0 超时）环境性豁免**（三重证据：全局雪花 diff 形态/UI 路径改动全离屏分支审查/抽样复跑功能全通）；首轮 55 失败中额外项=native daemon 干扰（弹窗→idle 超时，已消除）；c) 最终裁决需 Linux CI（T1.0） |
 | T1.22 | manual run 脚本流程纪律：step4 截图撞 native tp preloaded 弹窗、step5 daemon 启动路径错（均手写脚本重复踩已记录的坑）→ T1.13 harvester helper 提升优先级：封装 daemon 启停/空载保证/弹窗 dismiss/workspace 等待/产物六件套，manual run 一律走 helper | 所有 manual run 产物出自 helper（坑清零）；T1.13 完成即闭环 | T1.13 | ⬜ | helper 脚本 | ✅ 由 runner/demo 内置空 daemon+弹窗兜底制度性消除 |
 | T1.23 | 默认参数大 trace 超护栏：默认全量收集（高数千 px）× 默认 dpr2 超 32M 像素上限直接抛错——"默认"开箱不可用 | 方案 A 自动降 dpr 重试（result 如实报告实际 dpr）或方案 B 错误信息引导 devicePixelRatio:1；owner 决策后实现 | T1.5 | ✅ | 修复 + 用例 | ✅ negotiateDpr 纯函数 + result.devicePixelRatio |
 | T1.24 | 黄金场景矩阵制度化：G1 默认全量（已建：序列断言 vs UI DOM）、G2 用户 4-track pin+A2 窗（已有 A2 用例）、G3 大窗口 A3（已有）；交付纪律：给用户的 review 图只出自 G 矩阵产物（附 UI 参照并排），禁止临时手造参数演示图充当交付物 | G 矩阵全部有自动断言 + 产物规范（每场景 PNG+metadata+UI 参照）；后续新场景（M2 postMessage demo）先入矩阵再交付 | T1.9 | 🔵 | spec + 产物 | 🔵 制度执行中；G1 已落地（序列断言 vs UI DOM） |
