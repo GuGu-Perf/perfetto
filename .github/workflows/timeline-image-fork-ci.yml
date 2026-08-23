@@ -1,35 +1,36 @@
 # Fork-only CI for the timeline-image work (T1.0). The official ui-tests.yml
-# requires self-hosted runners we do not have; this workflow runs the
-# platform-independent quality gates on GitHub-hosted ubuntu runners:
-#   stage 1 (this file): build (tsc/lint/format via ui/build) + full unit
-#     suite. These do not depend on the AGPL local-only fixtures.
-#   stage 2 (later, needs synthetic traces): Playwright integration specs
-#     and golden-scenario baselines (fixtures cannot ship in the repo).
+# needs self-hosted runners; this workflow runs the UI quality gates that do
+# not require the full buildtools install (emsdk/C++ toolchain) on a plain
+# GitHub-hosted ubuntu runner:
+#   - TypeScript type check (tsc --noEmit)
+#   - Full unit suite (vitest, 2568 tests)
+# The integration specs and golden baselines need fixtures and stay local
+# until the synthetic-trace coverage lands in CI (stage 2).
 name: timeline-image (fork)
 on:
   push:
     branches: [pr1-timeline-image]
   workflow_dispatch:
 jobs:
-  build-and-unittests:
+  typecheck-and-unittests:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ui
     steps:
       - uses: actions/checkout@v5
-      - name: Install build dependencies (emsdk, python, node)
-        uses: ./.github/actions/install-build-deps
+      - uses: pnpm/action-setup@v4
         with:
-          install-flags: --ui
-      - name: Build UI (includes tsc + eslint + prettier gate)
-        run: ui/build
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - name: Install UI dependencies
+        run: pnpm install --frozen-lockfile
+      - name: TypeScript check
+        run: ./node_modules/.bin/tsc --noEmit
       - name: Unit tests (full suite)
-        run: ui/run-unittests --out out/ui --no-build
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            out/ui/*.log
-            ui/*.log
-          if-no-files-found: ignore
+        run: ./node_modules/.bin/vitest run --config vitest.config.mjs
