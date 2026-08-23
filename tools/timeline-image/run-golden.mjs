@@ -7,7 +7,7 @@
 //    evidence, six-piece artifacts (png/metadata/ui-reference/engine/
 //    run.json/log) under out/test-runs/<ts>-golden-<scenario>/.
 import {chromium} from '../../ui/node_modules/.pnpm/playwright@1.58.2/node_modules/playwright/index.mjs';
-import {writeFileSync, mkdirSync, readFileSync} from 'fs';
+import {writeFileSync, mkdirSync, readFileSync, symlinkSync, rmSync, existsSync} from 'fs';
 import {execSync} from 'child_process';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
@@ -167,6 +167,14 @@ async function main() {
       process.exitCode = 1;
     } else {
       console.log('BASELINE MATCH ✓');
+      // Refresh LATEST pointers to this verified run (T1.13).
+      for (const [link, target] of [
+        [`${ROOT}out/test-runs/LATEST-png`, `${out}/golden.png`],
+        [`${ROOT}out/test-runs/LATEST-${scenarioName}.json`, `${out}/metadata.json`],
+      ]) {
+        rmSync(link, {force: true});
+        symlinkSync(target, link);
+      }
     }
   }
   console.log(`${scenarioName}: ${result.width}x${result.height}, tracks=${result.tracks.length}, warnings=${JSON.stringify(result.warnings)}, engine=${engine}, wall=${Date.now() - t0}ms`);
