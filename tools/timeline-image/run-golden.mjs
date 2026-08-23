@@ -7,7 +7,7 @@
 //    evidence, six-piece artifacts (png/metadata/ui-reference/engine/
 //    run.json/log) under out/test-runs/<ts>-golden-<scenario>/.
 import {chromium} from '../../ui/node_modules/.pnpm/playwright@1.58.2/node_modules/playwright/index.mjs';
-import {writeFileSync, mkdirSync} from 'fs';
+import {writeFileSync, mkdirSync, readFileSync} from 'fs';
 import {execSync} from 'child_process';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
@@ -106,6 +106,41 @@ async function main() {
     trace: TRACE.split('/').pop(), modalsDismissed: modalCount,
   }, null, 1));
   writeFileSync(`${out}/run.log`, log.join('\n'));
+  // ---- baseline discipline (plan v9.13): expectations are frozen files.
+  // A change of implementation must NOT silently change expectations;
+  // updating a baseline is an explicit, reviewable act.
+  const baselinePath = `${ROOT}tools/timeline-image/baselines/${scenarioName}.json`;
+  const fingerprint = (r) => JSON.stringify({
+    width: r.width, height: r.height, warnings: r.warnings,
+    tracks: r.tracks.map((t) => [t.name, t.uri, t.h, t.depth, t.group]),
+  });
+  let pngHash = 0x811c9dc5;
+  for (const b of Buffer.from(result.b64, 'base64')) pngHash = ((pngHash ^ b) * 0x01000193) >>> 0;
+  if (process.argv.includes('--update-baseline')) {
+    writeFileSync(baselinePath, JSON.stringify({
+      scenario: scenarioName, fingerprint: fingerprint(result), pngHash: pngHash.toString(16),
+      note: 'sequence is the hard expectation; pngHash is advisory until T1.14 (residual rasterization flake) is closed',
+    }, null, 1));
+    console.log('BASELINE UPDATED: ' + baselinePath);
+  } else {
+    let baseline;
+    try { baseline = JSON.parse(readFileSync(baselinePath, 'utf8')); } catch (e) { console.log('BASELINE READ ERROR:', String(e)); baseline = undefined; }
+    if (!baseline) {
+      console.log('BASELINE MISSING — run with --update-baseline to freeze expectations first');
+      process.exitCode = 2;
+    } else if (baseline.fingerprint !== fingerprint(result)) {
+      console.log('BASELINE MISMATCH (track sequence/size/warnings changed).');
+      console.log('  If intentional: update the baseline in a separate, explained commit.');
+      console.log('  Diff: ' + baselinePath);
+      process.exitCode = 1;
+    } else {
+      // Advisory pixel check: known residual flake (T1.14) may vary the hash.
+      if (baseline.pngHash !== pngHash.toString(16)) {
+        console.log('note: png hash differs from baseline (advisory only until T1.14 closes)');
+      }
+      console.log('BASELINE MATCH ✓');
+    }
+  }
   console.log(`${scenarioName}: ${result.width}x${result.height}, tracks=${result.tracks.length}, warnings=${JSON.stringify(result.warnings)}, engine=${engine}, wall=${Date.now() - t0}ms`);
   console.log(`artifacts: ${out}`);
   await browser.close();
