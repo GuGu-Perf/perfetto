@@ -1,0 +1,33 @@
+# Fork-only CI for the timeline-image work (T1.0). The official ui-tests.yml
+# requires self-hosted runners we do not have; this workflow runs the
+# platform-independent quality gates on GitHub-hosted ubuntu runners:
+#   stage 1 (this file): build (tsc/lint/format via ui/build) + full unit
+#     suite. These do not depend on the AGPL local-only fixtures.
+#   stage 2 (later, needs synthetic traces): Playwright integration specs
+#     and golden-scenario baselines (fixtures cannot ship in the repo).
+name: timeline-image (fork)
+on:
+  push:
+    branches: [pr1-timeline-image]
+  workflow_dispatch:
+jobs:
+  build-and-unittests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install build dependencies (emsdk, python, node)
+        uses: ./.github/actions/install-build-deps
+      - name: Build UI (includes tsc + eslint + prettier gate)
+        run: ui/build
+      - name: Unit tests (full suite)
+        run: ui/run-unittests --out out/ui --no-build
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            out/ui/*.log
+            ui/*.log
+          if-no-files-found: ignore
