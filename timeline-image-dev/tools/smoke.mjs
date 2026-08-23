@@ -1,14 +1,26 @@
-import {chromium} from '/Users/vinson/CodeBuddy/Claw/myPerfetto/ui/node_modules/.pnpm/playwright@1.58.2/node_modules/playwright/index.mjs';
-import {writeFileSync, mkdirSync} from 'fs';
+// Smoke matrix (user-approved 2026-08-23): per-fixture key windows/threads
+// from prior analysis + full-CPU freq/sched (no hand-picked subsets).
+// Every parameter change to this table requires user review first (PLAN D.0).
+import {chromium} from '../../ui/node_modules/.pnpm/playwright@1.58.2/node_modules/playwright/index.mjs';
+import {writeFileSync, rmSync} from 'fs';
 import {execSync} from 'child_process';
 const T0 = Date.now();
 setTimeout(() => { console.error('HARD TIMEOUT 600s'); process.exit(3); }, 600_000);
-const ROOT = '/Users/vinson/CodeBuddy/Claw/myPerfetto/';
+const ROOT = new URL('../../', import.meta.url).pathname;
 const OUT = ROOT + 'timeline-image-dev/results/REPORT-ASSETS/smoke/';
+rmSync(OUT, {recursive: true, force: true});
+import {mkdirSync} from 'fs';
 mkdirSync(OUT, {recursive: true});
-const FIXTURES = ['example_android_trace.pftrace', 'smartperfetto_android_scroll_jank_customer.pftrace',
-  'smartperfetto_android_scroll_standard.pftrace', 'smartperfetto_android_startup_heavy.pftrace',
-  'smartperfetto_android_startup_light.pftrace', 'smartperfetto_flutter_scroll_surface_view.pftrace'];
+
+// User-approved table: per-fixture key thread + window (see SMOKE.md for rationale).
+const FIXTURES = [
+  {file: 'example_android_trace.pftrace', tag: 'example', thread: {name: 'RenderThread', tid: 4543}, window: ['3428202643641', '3428410622726'], basis: 'user case G-E1 (slice[95635..115701])'},
+  {file: 'smartperfetto_android_scroll_jank_customer.pftrace', tag: 'jank_customer', thread: {name: 'RenderThread', tid: 13585}, window: ['506734750000000', '506736000000000'], basis: 'A2 jank cluster (worst frame 62.7ms)'},
+  {file: 'smartperfetto_android_scroll_standard.pftrace', tag: 'scroll_standard', thread: {name: 'RenderThread', tid: 7151}, window: ['271814424593780', '271815424593780'], basis: 'longest slice 22.8ms ±500ms'},
+  {file: 'smartperfetto_android_startup_heavy.pftrace', tag: 'startup_heavy', thread: {name: 'RenderThread', tid: 25600}, window: ['564166286132658', '564167286132658'], basis: 'longest slice 1.34s ±500ms'},
+  {file: 'smartperfetto_android_startup_light.pftrace', tag: 'startup_light', thread: {name: 'RenderThread', tid: 2131}, window: ['40920750378802', '40921750378802'], basis: 'longest slice 1.05s ±500ms'},
+  {file: 'smartperfetto_flutter_scroll_surface_view.pftrace', tag: 'flutter_scroll', thread: {name: '1.raster', tid: 10627}, extraThread: {name: '1.ui', tid: 10626}, window: ['272267580552201', '272268580552201'], basis: 'flutter raster/ui threads, longest slice ±500ms'},
+];
 const rows = [];
 for (const f of FIXTURES) {
   try { execSync('pkill -f "trace_processor_shell -D"'); } catch {}
@@ -19,14 +31,24 @@ for (const f of FIXTURES) {
   const page = await browser.newPage({viewport: {width: 1280, height: 800}});
   await page.goto('http://127.0.0.1:10000/?testing=1');
   const input = await page.waitForSelector('input.trace_file', {state: 'attached', timeout: 30000});
-  await input.setInputFiles(ROOT + 'test/data/' + f);
+  await input.setInputFiles(ROOT + 'test/data/' + f.file);
   await page.waitForFunction(() => {
     if (!(window.ctx && window.ctx.traceInfo)) return false;
     let n = 0; const walk = (x) => { if (x.uri) n++; for (const c of x.children) walk(c); };
     walk(window.ctx.defaultWorkspace.tracks); return n > 20;
   }, null, {timeout: 180000});
   await page.waitForTimeout(2000);
-  const res = await page.evaluate(async () => {
+  const res = await page.evaluate(async (spec) => {
+    // Collect ALL cpu freq/sched URIs actually present (no hand-picked subset).
+    const uris = [];
+    const walk = (n) => {
+      if (n.uri && (/^\/cpu_freq_/.test(n.uri) || /^\/sched_/.test(n.uri))) uris.push(n.uri);
+      for (const c of n.children) walk(c);
+    };
+    walk(window.ctx.defaultWorkspace.tracks);
+    const threadUris = [];
+    const walk2 = (n) => { if (n.uri && n.headless) threadUris.push(n.uri); for (const c of n.children) walk2(c); };
+    walk2(window.ctx.defaultWorkspace.tracks);
     const shot = async (opts, tag) => {
       const r = await window.ctx.timelineImage.renderTimelineImage(opts);
       const bmp = await createImageBitmap(r.blob);
@@ -40,29 +62,38 @@ for (const f of FIXTURES) {
       let bin = '';
       for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
       return {w: r.width, h: r.height, tracks: r.trackBoxes.length, warn: [...r.warnings],
-        colors: colors.size, ms: Math.round(r.perf.elapsedMs), b64: btoa(bin), tag};
+        colors: colors.size, ms: Math.round(r.perf.elapsedMs), b64: btoa(bin), tag,
+        head: r.trackBoxes.slice(0, 3).map((b) => b.name)};
     };
-    const full = window.ctx.timeline.visibleWindow;
-    const mid = full.midpoint;
     const out = [];
-    // S1 默认参数（仅定宽度）
+    // S1 zero-config default: capped at 2160px + TRUNCATED when full set is taller.
     out.push(await shot({widthPx: 1200, devicePixelRatio: 1, perTrackTimeoutMs: 30000}, 'default'));
-    // S2 常用调整：挑 cpu0-3 freq+sched + 中段 1s 窗 + 4:3（用户截窗口时的典型用法）
+    // S2 key-window set (user-approved): full-CPU freq+sched + key thread(s) PINNED first.
+    // Resolve thread group URIs by "<name> <tid>" title so pinTracks can order them.
+    const threadGroups = [];
+    const findThreads = (n) => {
+      for (const t of [spec.thread].concat(spec.extraThread ? [spec.extraThread] : [])) {
+        if (n.uri && n.headless && n.name === `${t.name} ${t.tid}`) threadGroups.push(n.uri);
+      }
+      for (const c of n.children) findThreads(c);
+    };
+    findThreads(window.ctx.defaultWorkspace.tracks);
     out.push(await shot({
-      trackUris: ['/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
-                  '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3'],
-      timeSpan: {start: mid.toTime().toString(), end: mid.addNumber(1_000_000_000).toTime().toString()},
-      aspectRatio: 4 / 3, devicePixelRatio: 1, perTrackTimeoutMs: 30000,
+      trackUris: uris.concat(threadGroups),
+      pinTracks: threadGroups,
+      timeSpan: {start: spec.window[0], end: spec.window[1]},
+      widthPx: 1600, devicePixelRatio: 1, perTrackTimeoutMs: 30000,
     }, 'tuned'));
-    return out;
-  });
+    return {uris, ...out.reduce((a, r, i) => (a[i === 0 ? 's1' : 's2'] = r, a), {})};
+  }, f);
   await browser.close();
-  for (const r of res) {
-    const name = `${f.replace(/\..*/, '')}-${r.tag}.png`;
-    writeFileSync(OUT + name, Buffer.from(r.b64, 'base64'));
-    rows.push({fixture: f.replace(/\..*/, ''), case: r.tag, ...r, b64: undefined});
+  for (const [k, tag] of [['s1', 'default'], ['s2', 'tuned']]) {
+    const r = res[k];
+    writeFileSync(`${OUT}${f.tag}-${tag}.png`, Buffer.from(r.b64, 'base64'));
+    rows.push({fixture: f.tag, case: tag, basis: f.basis, w: r.w, h: r.h, tracks: r.tracks,
+      warn: r.warn, colors: r.colors, ms: r.ms, head: r.head});
   }
-  console.log(`${f}: default ${res[0].w}x${res[0].h} ${res[0].tracks}t ${res[0].ms}ms warn=${JSON.stringify(res[0].warn)} | tuned ${res[1].w}x${res[1].h} ratio=${(res[1].w / res[1].h).toFixed(3)} ${res[1].tracks}t ${res[1].ms}ms warn=${JSON.stringify(res[1].warn)}`);
+  console.log(`${f.tag}: default ${res.s1.w}x${res.s1.h} ${res.s1.tracks}t warn=${JSON.stringify(res.s1.warn)} | tuned ${res.s2.w}x${res.s2.h} ${res.s2.tracks}t warn=${JSON.stringify(res.s2.warn)} head=${JSON.stringify(res.s2.head)}`);
 }
 writeFileSync(OUT + 'smoke.json', JSON.stringify(rows, null, 1));
 console.log(`TOTAL ${((Date.now() - T0) / 1000).toFixed(0)}s`);

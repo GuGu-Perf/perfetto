@@ -89,6 +89,10 @@ const SHELL_INDENT_PX = 8;
 const SHELL_TITLE_OFFSET_PX = 3;
 const SHELL_FONT = `300 14px ${FONT_COMPACT}`;
 const DEFAULT_WIDTH_PX = 1920;
+// Zero-config default cap (user-approved design): the default composition
+// (all visible workspace tracks) is truncated to one viewable page; request
+// an explicit trackUris/trackNames set for the full list.
+const DEFAULT_MAX_HEIGHT_PX = 2160;
 
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
@@ -215,6 +219,7 @@ export async function renderOffscreenTimeline(
     expanded: boolean;
   }[] = [];
   const missingTracks: string[] = [];
+  let truncatedByDefaultCap = false;
   // Track vertical bounds are canvas-absolute: they start below the time
   // axis row, as TrackView.drawCanvas places tracks at verticalBounds.top.
   let top = axisHeight;
@@ -265,7 +270,14 @@ export async function renderOffscreenTimeline(
     }
   }
   const seenUris = new Set<string>();
+  let truncated = false;
   for (const {node, depth, uri, isGroupHeader, expanded} of entries) {
+    // Only the zero-config default collection is capped; explicit
+    // trackUris/trackNames sets are honored up to the canvas guardrail.
+    if (trackNodes !== undefined && top + nodeHeight(trace, node) > axisHeight + DEFAULT_MAX_HEIGHT_PX) {
+      truncated = true;
+      break;
+    }
     // A headless URI expands to its leaf tracks, which may also appear
     // verbatim in the list; render each track only once.
     if (uri !== '' && seenUris.has(uri)) continue;
@@ -290,6 +302,10 @@ export async function renderOffscreenTimeline(
       `renderOffscreenTimeline: no renderable tracks ` +
         `(missing: ${missingTracks.join(', ')})`,
     );
+  }
+  if (truncated) {
+    // surfaced through the public result warnings by the adapter/manager
+    truncatedByDefaultCap = true;
   }
 
   // Webfonts load asynchronously with font-display: swap; drawing text
@@ -555,7 +571,10 @@ export async function renderOffscreenTimeline(
     height: cssHeight,
     trackBoxes,
     timedOutTracks,
-    warnings: missingTracks.length > 0 ? ['TRACK_MISSING'] : [],
+    warnings: [
+      ...(missingTracks.length > 0 ? ['TRACK_MISSING'] : []),
+      ...(truncatedByDefaultCap ? ['TRUNCATED'] : []),
+    ],
     devicePixelRatio: dpr,
     rounds,
     perf: {loadMs, drawMs},
@@ -582,6 +601,14 @@ export function negotiateDpr(
     `renderOffscreenTimeline: output canvas too large ` +
       `(${cssWidth}x${cssHeight} @${requestedDpr}x)`,
   );
+}
+
+// Approximate row height for the default-cap check without constructing a
+// TrackView: group headers are 18px, real tracks report their getHeight().
+function nodeHeight(trace: TraceImpl, node: TrackNode): number {
+  const renderer = node.uri ? trace.tracks.getWrappedTrack(node.uri)?.track : undefined;
+  const h = renderer?.getHeight?.();
+  return h === undefined ? 18 : Math.max(h, 18);
 }
 
 function resolveTrackNode(

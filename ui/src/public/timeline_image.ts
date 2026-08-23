@@ -98,7 +98,13 @@ export interface TimelineImageOptions {
 
 /** Warning kinds reported on a completed TimelineImageResult. */
 export type TimelineImageWarning =
-  'TIMELINE_UNAVAILABLE' | 'TRACK_MISSING' | 'TRACK_NOT_RENDERED' | 'TIMEOUT';
+  | 'TIMELINE_UNAVAILABLE'
+  | 'TRACK_MISSING'
+  | 'TRACK_NOT_RENDERED'
+  | 'TIMEOUT'
+  // The zero-config default composition was truncated at the default
+  // height cap (2160 CSS px); request explicit trackUris for everything.
+  | 'TRUNCATED';
 
 /** Bounding box of a rendered track, in CSS pixels. */
 export interface TimelineImageTrackBox {

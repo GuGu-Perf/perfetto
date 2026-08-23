@@ -418,9 +418,12 @@ test.describe.serial('timeline image rendering', () => {
         offscreenHead: r.trackBoxes.slice(0, 10).map((b) => b.name),
       };
     });
-    expect(result.warnings).toEqual([]);
-    // The offscreen render includes every default track; the DOM only
-    // materializes the viewport, so compare the common prefix.
+    // The zero-config default is capped at one viewable page (user-approved
+    // design): the fixture's full workspace (~6600px) must be truncated.
+    expect(result.warnings).toContain('TRUNCATED');
+    expect(result.height).toBeLessThanOrEqual(2160 + 22);
+    // The offscreen render includes at least the viewport's tracks; the DOM
+    // only materializes the viewport, so compare the common prefix.
     expect(result.trackCount).toBeGreaterThanOrEqual(result.uiVisibleCount);
     const k = Math.min(result.uiHead.length, result.offscreenHead.length);
     expect(k).toBeGreaterThanOrEqual(5);
