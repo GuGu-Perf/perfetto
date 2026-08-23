@@ -2,7 +2,9 @@
 # The corresponding binary files are downloaded by
 # `tools/test_data download`, ran by install-build-deps.
 /data/*
-!/data/*.sha256
+!data/timeline_image_synth.json
+!/data/*
+!data/timeline_image_synth.json.sha256
 !/data/OWNERS
 
 !/data/ui-screenshots
