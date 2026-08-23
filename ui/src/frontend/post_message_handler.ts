@@ -502,11 +502,19 @@ async function runRenderTimelineImage(
     // and this request back-to-back, the queue bridges the load delay.
     const deadline = performance.now() + 60_000;
     let trace = AppImpl.instance.trace;
-    while (trace === undefined && performance.now() < deadline) {
+    // Wait for the load to COMPLETE, not just for the TraceImpl object: it
+    // is created early, but the timeline plugin registers the render
+    // renderer from onTraceLoad, which runs at the end of loading. Without
+    // the isLoadingTrace half, a render posted back-to-back with a slow
+    // (large) trace fails with "no timeline renderer registered".
+    while (
+      (trace === undefined || AppImpl.instance.isLoadingTrace) &&
+      performance.now() < deadline
+    ) {
       await new Promise((r) => setTimeout(r, 200));
       trace = AppImpl.instance.trace;
     }
-    if (trace === undefined) {
+    if (trace === undefined || AppImpl.instance.isLoadingTrace) {
       reply({
         action: 'renderTimelineImageResult',
         id: req.id,
@@ -555,11 +563,16 @@ async function runListTracks(
   try {
     const deadline = performance.now() + 60_000;
     let trace = AppImpl.instance.trace;
-    while (trace === undefined && performance.now() < deadline) {
+    // Complete-load wait, same rationale as the render hold: the workspace
+    // tree is built by plugins during onTraceLoad.
+    while (
+      (trace === undefined || AppImpl.instance.isLoadingTrace) &&
+      performance.now() < deadline
+    ) {
       await new Promise((r) => setTimeout(r, 200));
       trace = AppImpl.instance.trace;
     }
-    if (trace === undefined) {
+    if (trace === undefined || AppImpl.instance.isLoadingTrace) {
       reply({
         action: 'listTracksResult',
         id: req.id,
