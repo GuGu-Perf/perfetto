@@ -88,6 +88,7 @@ const TIME_AXIS_HEIGHT_PX = 22;
 const SHELL_INDENT_PX = 8;
 const SHELL_TITLE_OFFSET_PX = 3;
 const SHELL_FONT = `300 14px ${FONT_COMPACT}`;
+const DEFAULT_WIDTH_PX = 1920;
 
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
@@ -102,8 +103,13 @@ export interface OffscreenTimelineRenderOptions {
     depth: number;
   }>;
   readonly timeSpan: HighPrecisionTimeSpan;
-  // Width of the produced image in CSS pixels.
-  readonly widthPx: number;
+  // Width of the produced image in CSS pixels. Mutually exclusive with
+  // `aspectRatio`; when neither is given the width defaults to 1920.
+  readonly widthPx?: number;
+  // Target width/height ratio; the width becomes round(height * ratio),
+  // where the height derives from the track set. Mutually exclusive with
+  // `widthPx`.
+  readonly aspectRatio?: number;
   // Device pixel ratio of the produced canvas. Default: 2.
   readonly devicePixelRatio?: number;
   // Data is fetched at this fraction of the canvas resolution (power-of-two
@@ -144,6 +150,8 @@ export interface OffscreenTimelineRenderOutput {
   }>;
   // Tracks whose data did not become ready within the per-track budget.
   readonly timedOutTracks: readonly string[];
+  // Structured warning kinds (merged into the public result by the manager).
+  readonly warnings: string[];
   // Number of fixed-point rounds actually executed.
   readonly rounds: number;
   // Phase timings (ms), mirroring the metatrace event names (plan §6.5).
@@ -158,6 +166,7 @@ export async function renderOffscreenTimeline(
     trackUris,
     timeSpan,
     widthPx,
+    aspectRatio,
     devicePixelRatio = 2,
     dataResolutionScale = 0.5,
     perTrackTimeoutMs = 5_000,
@@ -166,6 +175,21 @@ export async function renderOffscreenTimeline(
     includeTimeAxis = true,
     trackNodes,
   } = options;
+
+  // Shape contract: widthPx and aspectRatio constrain the same degree of
+  // freedom (the height is always derived from the track set), so at most
+  // one may be given.
+  if (widthPx !== undefined && aspectRatio !== undefined) {
+    throw new Error(
+      'renderOffscreenTimeline: widthPx and aspectRatio are mutually exclusive',
+    );
+  }
+  if (aspectRatio !== undefined && !(aspectRatio > 0)) {
+    throw new Error('renderOffscreenTimeline: aspectRatio must be > 0');
+  }
+  if (widthPx !== undefined && !(widthPx >= 1)) {
+    throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
+  }
 
   // ------------------------------------------------------------------ layout
   const shellWidth = includeTrackShell ? TRACK_SHELL_WIDTH : 0;
@@ -231,7 +255,12 @@ export async function renderOffscreenTimeline(
       }
     }
   }
+  const seenUris = new Set<string>();
   for (const {node, depth, uri, isGroupHeader, expanded} of entries) {
+    // A headless URI expands to its leaf tracks, which may also appear
+    // verbatim in the list; render each track only once.
+    if (uri !== '' && seenUris.has(uri)) continue;
+    if (uri !== '') seenUris.add(uri);
     // showHeadless=true: group header rows (headless summary containers)
     // get their 18px title height instead of collapsing to zero.
     const view = new TrackView(trace, node, top, true);
@@ -254,10 +283,6 @@ export async function renderOffscreenTimeline(
     );
   }
 
-  if (!(widthPx >= 1)) {
-    throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
-  }
-
   // Webfonts load asynchronously with font-display: swap; drawing text
   // before they are ready would use fallback glyphs and differ between
   // renders, breaking determinism (and visual parity with the live UI).
@@ -266,8 +291,14 @@ export async function renderOffscreenTimeline(
     await document.fonts.ready;
   }
 
-  const cssWidth = widthPx;
+  // Shape: the height is derived from the track set (layout above), so the
+  // width is either given explicitly or solved from the aspect ratio.
   const cssHeight = top;
+  const cssWidth =
+    widthPx ??
+    (aspectRatio !== undefined
+      ? Math.round(cssHeight * aspectRatio)
+      : DEFAULT_WIDTH_PX);
   const pixels = cssWidth * devicePixelRatio * cssHeight * devicePixelRatio;
   if (
     cssWidth * devicePixelRatio > MAX_CANVAS_EDGE_PX ||
@@ -281,11 +312,11 @@ export async function renderOffscreenTimeline(
   }
 
   // Data resolution: like the interactive path, quantized to a power of two,
-  // but computed for `widthPx / dataResolutionScale` so that (with the
+  // but computed for `cssWidth / dataResolutionScale` so that (with the
   // default 0.5) a 2x canvas fetches 1x data.
   const maybeResolution = calculateResolution(
     timeSpan,
-    Math.max(1, widthPx / dataResolutionScale),
+    Math.max(1, cssWidth / dataResolutionScale),
   );
   if (!maybeResolution.ok) {
     throw new Error(
@@ -527,6 +558,7 @@ export async function renderOffscreenTimeline(
     height: cssHeight,
     trackBoxes,
     timedOutTracks,
+    warnings: missingTracks.length > 0 ? ['TRACK_MISSING'] : [],
     rounds,
     perf: {loadMs, drawMs},
   };

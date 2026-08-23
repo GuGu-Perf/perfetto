@@ -44,18 +44,18 @@ const SCENARIOS = {
   'G-E1': {
     trace: EXAMPLE_TRACE,
     workspaceMarker: '/thread_75',
-    aspectRatio: 4 / 3,
-    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 pinned, standard mode, 4:3',
+    description: 'User case: example trace, slice[95635]..slice[115701] window, RenderThread 4543 pinned, standard mode, 4:3 (native API trackNames + aspectRatio)',
     opts: {
       trackUris: ['/cpu_freq_cpu0','/cpu_freq_cpu1','/cpu_freq_cpu2','/cpu_freq_cpu3',
                   '/cpu_freq_cpu4','/cpu_freq_cpu5','/cpu_freq_cpu6','/cpu_freq_cpu7',
                   '/cpu_freq_cpu8',
                   '/sched_cpu0','/sched_cpu1','/sched_cpu2','/sched_cpu3',
                   '/sched_cpu4','/sched_cpu5','/sched_cpu6','/sched_cpu7',
-                  '/sched_cpu8',
-                  '/thread_75'],
+                  '/sched_cpu8'],
+      trackNames: [{name: 'RenderThread', tid: 4543}],
       pinTracks: ['/thread_75'],
       timeSpan: {start: '3428202643641', end: '3428410622726'},
+      aspectRatio: 4 / 3,
       devicePixelRatio: 1, perTrackTimeoutMs: 20000,
     },
     uiRefClip: {x: 230, y: 114, width: 1690, height: 300},
@@ -110,16 +110,7 @@ async function main() {
   const uiPng = await page.screenshot({clip: scenario.uiRefClip});
   writeFileSync(`${out}/ui-reference.png`, uiPng);
 
-  let evalOpts = {...scenario.opts};
-  if (scenario.aspectRatio) {
-    // Pass 1: measure the track-derived height (width does not affect it).
-    const probe = await page.evaluate(async (opts) => {
-      const r = await window.ctx.timelineImage.renderTimelineImage({...opts, widthPx: 800});
-      return r.height;
-    }, evalOpts);
-    evalOpts.widthPx = Math.round(probe * scenario.aspectRatio);
-    log.push(`aspect ${scenario.aspectRatio}: height=${probe} -> widthPx=${evalOpts.widthPx}`);
-  }
+  const evalOpts = {...scenario.opts};
   const result = await page.evaluate(async (opts) => {
     const r = await window.ctx.timelineImage.renderTimelineImage(opts);
     const ab = await r.blob.arrayBuffer();

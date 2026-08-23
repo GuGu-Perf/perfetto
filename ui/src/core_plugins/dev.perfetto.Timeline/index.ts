@@ -94,11 +94,19 @@ async function renderTimelineImageAdapter(
   // interactive tree shows — group header rows (summary/headless
   // containers, expanded or collapsed) plus leaf tracks, in tree order.
   // Explicit trackUris keeps the flat-URI semantics (headless URIs expand
-  // to their leaf descendants).
+  // to their leaf descendants). trackNames resolve against the workspace
+  // and merge into trackUris.
+  const {resolvedNameUris, unmatchedNames} = resolveTrackNames(
+    trace,
+    opts.trackNames ?? [],
+  );
   const defaultNodes = opts.trackUris
     ? undefined
     : collectDefaultTrackNodes(trace.defaultWorkspace.tracks);
-  const requested = opts.trackUris ?? [];
+  const requested = [
+    ...(opts.trackUris ?? []),
+    ...resolvedNameUris.filter((uri) => !(opts.trackUris ?? []).includes(uri)),
+  ];
   const pinned = opts.pinTracks ?? [];
   const pinnedSet = new Set(pinned);
   const ordered = [
@@ -123,14 +131,63 @@ async function renderTimelineImageAdapter(
     trackUris: ordered,
     trackNodes: defaultNodes,
     timeSpan,
-    widthPx: opts.widthPx ?? 1920,
+    widthPx: opts.widthPx,
+    aspectRatio: opts.aspectRatio,
     devicePixelRatio: opts.devicePixelRatio,
     dataResolutionScale: opts.dataResolutionScale,
     perTrackTimeoutMs: opts.perTrackTimeoutMs,
     includeTrackShell: opts.includeTrackShell,
     includeTimeAxis: opts.includeTimeAxis,
   });
+  if (unmatchedNames.length > 0) {
+    if (!output.warnings.includes('TRACK_MISSING')) {
+      output.warnings.push('TRACK_MISSING');
+    }
+  }
   return output;
+}
+
+/**
+ * Resolve human-readable track selectors ({name, tid/pid}) against the
+ * workspace. Workspace titles are "<name> <tid>" for threads and
+ * "<name> <pid>" for processes, so an exact id match requires the id to
+ * appear in the title; a bare name matches titles equal to the name or
+ * starting with "<name> " (i.e. any thread with that name).
+ */
+function resolveTrackNames(
+  trace: TraceImpl,
+  selectors: ReadonlyArray<{name: string; tid?: number; pid?: number}>,
+): {resolvedNameUris: string[]; unmatchedNames: string[]} {
+  const titles: {uri: string; name: string; headless: boolean}[] = [];
+  const walk = (n: TrackNode) => {
+    if (n.uri && n.name) {
+      titles.push({uri: n.uri, name: n.name, headless: n.headless});
+    }
+    for (const child of n.children) walk(child);
+  };
+  walk(trace.defaultWorkspace.tracks);
+  const resolvedNameUris: string[] = [];
+  const unmatchedNames: string[] = [];
+  for (const sel of selectors) {
+    const id = sel.tid ?? sel.pid;
+    const matches = titles.filter(({name}) =>
+      id === undefined ? name === sel.name || name.startsWith(`${sel.name} `)
+      : name === `${sel.name} ${id}`,
+    );
+    if (matches.length === 0) {
+      unmatchedNames.push(
+        id === undefined ? sel.name : `${sel.name} [${id}]`,
+      );
+    } else {
+      // A thread group (headless, e.g. "RenderThread 4543") and its child
+      // tracks share the same title; prefer the group node — the renderer
+      // expands it to the thread's actual tracks (state + slices).
+      const groups = matches.filter((m) => m.headless);
+      const chosen = groups.length > 0 ? groups : matches;
+      resolvedNameUris.push(...chosen.map((m) => m.uri));
+    }
+  }
+  return {resolvedNameUris, unmatchedNames};
 }
 
 /**

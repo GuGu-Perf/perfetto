@@ -32,6 +32,7 @@ test('manager maps timed out tracks to a TIMEOUT warning', async () => {
     height: 10,
     trackBoxes: [{uri: '/t', name: 'T', top: 0, height: 10, depth: 0}],
     timedOutTracks: ['/t'],
+    warnings: [],
   }));
   const result = await manager.renderTimelineImage();
   expect(result.warnings).toEqual(['TIMEOUT']);
@@ -50,6 +51,7 @@ test('manager rejects when encoding fails', async () => {
     height: 10,
     trackBoxes: [],
     timedOutTracks: [],
+    warnings: [],
   }));
   await expect(manager.renderTimelineImage()).rejects.toThrow(/encoding/i);
 });

@@ -33,6 +33,31 @@ test('empty track list throws with missing uris listed', async () => {
   ).rejects.toThrow('/does/not/exist');
 });
 
+test('widthPx and aspectRatio are mutually exclusive', async () => {
+  const trace = createFakeTraceImpl();
+  await expect(
+    renderOffscreenTimeline({
+      trace,
+      trackUris: [],
+      timeSpan: span(0n, 1_000n),
+      widthPx: 100,
+      aspectRatio: 4 / 3,
+    }),
+  ).rejects.toThrow('mutually exclusive');
+});
+
+test('aspectRatio <= 0 is rejected', async () => {
+  const trace = createFakeTraceImpl();
+  await expect(
+    renderOffscreenTimeline({
+      trace,
+      trackUris: [],
+      timeSpan: span(0n, 1_000n),
+      aspectRatio: 0,
+    }),
+  ).rejects.toThrow('aspectRatio must be > 0');
+});
+
 test('oversized canvas is rejected before any canvas is created', async () => {
   const trace = createFakeTraceImpl();
   trace.tracks.registerTrack({

@@ -30,6 +30,7 @@ export interface TimelineImageRenderOutput {
   readonly height: number;
   readonly trackBoxes: readonly TimelineImageTrackBox[];
   readonly timedOutTracks: readonly string[];
+  readonly warnings: string[];
   readonly perf?: {loadMs: number; drawMs: number};
 }
 
@@ -58,7 +59,9 @@ export class TimelineImageManagerImpl implements TimelineImageManager {
     const encodeStart = performance.now();
     const blob = await canvasToBlob(output.canvas, opts.format ?? 'image/png');
     const encodeMs = performance.now() - encodeStart;
-    const warnings: TimelineImageWarning[] = [];
+    const warnings: TimelineImageWarning[] = [
+      ...(output.warnings as TimelineImageWarning[]),
+    ];
     if (output.timedOutTracks.length > 0) {
       warnings.push('TIMEOUT');
     }

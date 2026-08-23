@@ -28,6 +28,18 @@ export interface TimelineImageOptions {
    */
   readonly trackUris?: readonly string[];
   /**
+   * Resolve tracks by human-readable name (and optional thread/process id),
+   * e.g. {name: 'RenderThread', tid: 4543}. Matches workspace tracks whose
+   * title equals `name`, or `"<name> <tid>"` when tid is given. Resolved
+   * URIs are appended to `trackUris` (deduplicated); unmatched entries
+   * produce a TRACK_MISSING warning.
+   */
+  readonly trackNames?: readonly {
+    readonly name: string;
+    readonly tid?: number;
+    readonly pid?: number;
+  }[];
+  /**
    * Subset of tracks to pin to the top of the image, in order. Each entry
    * must also be part of the rendered set (explicitly or via the default);
    * entries which are not renderable produce a TRACK_NOT_RENDERED warning.
@@ -43,9 +55,19 @@ export interface TimelineImageOptions {
     readonly start: time | string;
     readonly end: time | string;
   };
-  /** Width of the produced image in CSS pixels. Default: 1920. */
+  /**
+   * Width of the produced image in CSS pixels. Mutually exclusive with
+   * `aspectRatio` (they constrain the same degree of freedom: the height is
+   * always derived from the track set). Default: 1920 when neither is given.
+   */
   readonly widthPx?: number;
-  /** Device pixel ratio of the canvas. Default: 2. */
+  /**
+   * Target width/height ratio of the produced image (e.g. 4/3). The height
+   * is determined by the track set, so the width becomes
+   * round(height * aspectRatio). Mutually exclusive with `widthPx`.
+   */
+  readonly aspectRatio?: number;
+  /** Device pixel ratio of the canvas (image crispness). Default: 2. */
   readonly devicePixelRatio?: number;
   /**
    * Data is fetched at this fraction of the canvas resolution. Default 0.5

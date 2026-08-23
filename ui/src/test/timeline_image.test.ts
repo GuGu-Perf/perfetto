@@ -421,4 +421,55 @@ test.describe.serial('timeline image rendering', () => {
     expect(k).toBeGreaterThanOrEqual(5);
     expect(result.offscreenHead.slice(0, k)).toEqual(result.uiHead.slice(0, k));
   });
+
+  test('T1.27/T1.28: trackNames resolution + aspectRatio shape', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: ['/sched_cpu0'],
+        trackNames: [{name: 'RenderThread', tid: 13585}],
+        timeSpan,
+        aspectRatio: 4 / 3,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 20_000,
+      });
+      return {
+        width: r.width,
+        height: r.height,
+        warnings: [...r.warnings],
+        names: r.trackBoxes.map((b) => b.name),
+      };
+    }, A2_WINDOW);
+    // RenderThread resolved by name+tid: the headless group expands to the
+    // thread's state + slice tracks, appended after the explicit uri list
+    // (pinTracks is what reorders, per the explicit-list ordering contract).
+    expect(result.warnings).toEqual([]);
+    expect(result.names.slice(1, 3)).toEqual([
+      'RenderThread 13585',
+      'RenderThread 13585',
+    ]);
+    expect(result.names[0]).toBe('CPU 0 Scheduling');
+    // Height is track-derived; the width must be exactly height * 4/3.
+    expect(result.width).toBe(Math.round(result.height * (4 / 3)));
+  });
+
+  test('T1.27: unmatched trackNames produce TRACK_MISSING', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: ['/sched_cpu0'],
+        trackNames: [{name: 'NoSuchThread', tid: 999999}],
+        timeSpan,
+        widthPx: 800,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 20_000,
+      });
+      return {warnings: [...r.warnings], trackCount: r.trackBoxes.length};
+    }, A2_WINDOW);
+    expect(result.warnings).toContain('TRACK_MISSING');
+    // The explicit uri still renders.
+    expect(result.trackCount).toBe(1);
+  });
 });
