@@ -495,8 +495,10 @@ async function runRenderTimelineImage(
       });
       return;
     }
+    // Raw JSON from the wire: cast through unknown; the adapter validates
+    // trackUris at the boundary.
     const r = await trace.timelineImage.renderTimelineImage(
-      req.options as Parameters<
+      req.options as unknown as Parameters<
         typeof trace.timelineImage.renderTimelineImage
       >[0],
     );

@@ -97,10 +97,6 @@ export interface TimelineImageTrackBox {
   readonly height: number;
   /** Nesting depth in the workspace tree (0 = top level), for indentation. */
   readonly depth: number;
-  /** True for group (summary/headless container) 18px title rows. */
-  readonly isGroupHeader?: boolean;
-  /** Group expansion state at render time (group headers only). */
-  readonly expanded?: boolean;
 }
 
 export interface TimelineImageResult {
@@ -129,7 +125,5 @@ export interface TimelineImageResult {
  * rendering fails with a TIMELINE_UNAVAILABLE warning.
  */
 export interface TimelineImageManager {
-  renderTimelineImage(
-    opts?: Partial<TimelineImageOptions>,
-  ): Promise<TimelineImageResult>;
+  renderTimelineImage(opts: TimelineImageOptions): Promise<TimelineImageResult>;
 }

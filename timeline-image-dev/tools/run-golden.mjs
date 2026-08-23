@@ -121,7 +121,7 @@ async function main() {
       let bin = '';
       for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
       return {b64: btoa(bin), width: r.width, height: r.height, warnings: r.warnings,
-        perf: r.perf, tracks: r.trackBoxes.map((b) => ({name: b.name, uri: b.uri, h: b.height, depth: b.depth, group: b.isGroupHeader || false}))};
+        perf: r.perf, tracks: r.trackBoxes.map((b) => ({name: b.name, uri: b.uri, h: b.height, depth: b.depth}))};
     }
     const r = await window.ctx.timelineImage.renderTimelineImage(opts);
     const ab = await r.blob.arrayBuffer();
@@ -129,7 +129,7 @@ async function main() {
     let bin = '';
     for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
     return {b64: btoa(bin), width: r.width, height: r.height, warnings: r.warnings,
-      perf: r.perf, tracks: r.trackBoxes.map((b) => ({name: b.name, uri: b.uri, h: b.height, depth: b.depth, group: b.isGroupHeader || false}))};
+      perf: r.perf, tracks: r.trackBoxes.map((b) => ({name: b.name, uri: b.uri, h: b.height, depth: b.depth}))};
   }, evalOpts);
   writeFileSync(`${out}/golden.png`, Buffer.from(result.b64, 'base64'));
   const engine = log.find((l) => l.includes('Opening trace using native accelerator')) ? 'native' : 'wasm';

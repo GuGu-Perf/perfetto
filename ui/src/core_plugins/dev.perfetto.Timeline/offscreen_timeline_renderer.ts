@@ -52,9 +52,6 @@ import {
   COLOR_BORDER_SECONDARY,
   COLOR_TEXT,
   COLOR_TEXT_MUTED,
-  COLOR_TRACK_SUMMARY_COLLAPSED,
-  COLOR_TRACK_SUMMARY_EXPANDED,
-  COLOR_TRACK_SUMMARY_EXPANDED_TEXT,
   FONT_COMPACT,
   TRACK_SHELL_WIDTH,
 } from '../../frontend/css_constants';
@@ -136,9 +133,6 @@ export interface OffscreenTimelineRenderOutput {
     height: number;
     // Nesting depth in the workspace tree, used for shell indentation.
     depth: number;
-    // Group (summary/headless container) title rows render as 18px headers.
-    readonly isGroupHeader: boolean;
-    readonly expanded: boolean;
   }>;
   // Tracks whose data did not become ready within the per-track budget.
   readonly timedOutTracks: readonly string[];
@@ -199,7 +193,9 @@ export async function renderOffscreenTimeline(
   // ------------------------------------------------------------------ layout
   const shellWidth = includeTrackShell ? TRACK_SHELL_WIDTH : 0;
   const axisHeight = includeTimeAxis ? TIME_AXIS_HEIGHT_PX : 0;
-  const uriDepth = buildUriDepthMap(trace.defaultWorkspace.tracks);
+  const {uriDepth, uriNode} = buildWorkspaceIndex(
+    trace.defaultWorkspace.tracks,
+  );
   const trackViews: TrackView[] = [];
   const trackBoxes: {
     uri: string;
@@ -207,8 +203,6 @@ export async function renderOffscreenTimeline(
     top: number;
     height: number;
     depth: number;
-    isGroupHeader: boolean;
-    expanded: boolean;
   }[] = [];
   const missingTracks: string[] = [];
   // Track vertical bounds are canvas-absolute: they start below the time
@@ -218,15 +212,13 @@ export async function renderOffscreenTimeline(
     node: TrackNode;
     depth: number;
     uri: string;
-    isGroupHeader: boolean;
-    expanded: boolean;
   }
   const entries: LayoutEntry[] = [];
   for (const uri of trackUris) {
     // Grouping nodes (threads, processes, summary groups) expand to their
     // leaf tracks, so the requested tracks actually render instead of
     // collapsing to a title row.
-    const nodes = resolveRenderableTrackNodes(trace, uri);
+    const nodes = resolveRenderableTrackNodes(trace, uri, uriNode);
     if (nodes.length === 0) {
       missingTracks.push(uri);
       continue;
@@ -239,8 +231,6 @@ export async function renderOffscreenTimeline(
         // Expanded descendants render one level deeper than the request.
         depth: uriDepth.get(nodeUri) ?? requestDepth + 1,
         uri: nodeUri,
-        isGroupHeader: false,
-        expanded: false,
       });
     }
   }
@@ -260,8 +250,6 @@ export async function renderOffscreenTimeline(
       top,
       height: view.height,
       depth,
-      isGroupHeader: false,
-      expanded: false,
     });
     top += view.height;
   }
@@ -290,15 +278,14 @@ export async function renderOffscreenTimeline(
 
   // Shape: the canvas height is the track content height, unless the caller
   // pinned an exact canvas height (padding below shorter content, TRUNCATED
-  // clipping above taller content). The width is either given explicitly or
-  // solved from the aspect ratio over the final canvas height.
+  // clipping above taller content). The width is given explicitly or 1920.
   const contentHeight = top;
   const truncatedByHeightPx =
     heightPx !== undefined && contentHeight > heightPx;
   const cssHeight = heightPx ?? contentHeight;
   const cssWidth = widthPx ?? DEFAULT_WIDTH_PX;
   // With many tracks (tall canvas) the default dpr 2 can exceed the browser
-  // canvas limits; negotiate rather than failing a zero-config call.
+  // canvas limits; negotiate a downgrade rather than failing the render.
   const dpr = negotiateDpr(cssWidth, cssHeight, devicePixelRatio);
 
   // Data resolution: like the interactive path, quantized to a power of two,
@@ -343,7 +330,7 @@ export async function renderOffscreenTimeline(
     right: cssWidth,
   });
 
-  const timedOutTracks: string[] = [];
+  const timedOutTracks = new Set<string>();
   const renderContexts = new Map<TrackView, TrackRenderContext>();
   for (const view of trackViews) {
     // verticalBounds are already canvas-absolute (they include axisHeight).
@@ -382,9 +369,7 @@ export async function renderOffscreenTimeline(
           trackRenderer.whenDataReady(renderCtx),
           budgetMs,
         );
-        if (!settled && !timedOutTracks.includes(view.node.uri)) {
-          timedOutTracks.push(view.node.uri);
-        }
+        if (!settled) timedOutTracks.add(view.node.uri);
         return settled;
       }),
     );
@@ -400,6 +385,8 @@ export async function renderOffscreenTimeline(
   // Freeze interactive canvas redraws for the whole warm-up/draw/composite
   // critical section: a live UI redraw between our await points evicts the
   // single-entry track memos and corrupts the frame (phase-B eviction race).
+  // (The font wait above happens before the freeze; the batch persona runs
+  // headless where the workspace cannot change mid-render.)
   trace.raf.freezeCanvasRedraws();
   let rounds = 0;
   let lastHash: string | undefined;
@@ -499,7 +486,7 @@ export async function renderOffscreenTimeline(
       includeSessionOverlays: false,
       // The interactive tree indents each row's content by depth * 8px
       // (track_shell.scss grid); mirror it so x-coordinates align with the
-      // live UI (asserted by the differential test).
+      // live UI.
       trackIndent: (view) =>
         Math.max(0, uriDepth.get(view.node.uri ?? '') ?? 0) * SHELL_INDENT_PX,
     });
@@ -507,7 +494,6 @@ export async function renderOffscreenTimeline(
     // coordinate space (the dpr transform above applies to the 2D ctx too).
     // Opaque backgrounds also clip any gridline overdraw into their strips.
     if (includeTrackShell) {
-      drawGroupHeaderRows(d2Ctx, trackBoxes, cssWidth);
       drawTrackShell(d2Ctx, trackBoxes, shellWidth, cssWidth);
     }
     if (includeTimeAxis) {
@@ -548,7 +534,7 @@ export async function renderOffscreenTimeline(
     width: cssWidth,
     height: cssHeight,
     trackBoxes,
-    timedOutTracks,
+    timedOutTracks: [...timedOutTracks],
     warnings: [
       ...(truncatedByHeightPx ? (['TRUNCATED'] as const) : []),
     ],
@@ -580,16 +566,43 @@ export function negotiateDpr(
   );
 }
 
-// Approximate row height for the default-cap check without constructing a
-// TrackView: mirrors getTrackHeight()'s rules (renderer height, floored at
-// the UI's minimum).
+/**
+ * Resolve a URI to its workspace node, falling back to a bare node for
+ * tracks that are registered but not placed in the tree (rendering works,
+ * with the URI as the name).
+ */
+/**
+ * One walk over the workspace tree producing, per URI: its depth (direct
+ * children of the root are depth 0; used for shell indentation) and its node
+ * (used to resolve requested URIs without re-walking the tree per URI).
+ */
+function buildWorkspaceIndex(root: TrackNode): {
+  uriDepth: Map<string, number>;
+  uriNode: Map<string, TrackNode>;
+} {
+  const uriDepth = new Map<string, number>();
+  const uriNode = new Map<string, TrackNode>();
+  const walk = (node: TrackNode, depth: number) => {
+    if (node.uri !== undefined && !uriDepth.has(node.uri)) {
+      uriDepth.set(node.uri, depth);
+      uriNode.set(node.uri, node);
+    }
+    for (const child of node.children) {
+      walk(child, depth + 1);
+    }
+  };
+  walk(root, -1); // The root container itself is not a track level.
+  return {uriDepth, uriNode};
+}
+
 function resolveTrackNode(
   trace: TraceImpl,
   uri: string,
+  uriNode: ReadonlyMap<string, TrackNode>,
 ): TrackNode | undefined {
   // Prefer the real workspace node (keeps name & metadata); fall back to a
   // bare node so rendering works even for unlisted URIs.
-  const existing = findNodeByUri(trace.defaultWorkspace.tracks, uri);
+  const existing = uriNode.get(uri);
   if (existing) return existing;
   if (trace.tracks.getTrack(uri)) {
     return new TrackNode({uri, name: uri});
@@ -605,8 +618,9 @@ function resolveTrackNode(
 function resolveRenderableTrackNodes(
   trace: TraceImpl,
   uri: string,
+  uriNode: ReadonlyMap<string, TrackNode>,
 ): TrackNode[] {
-  const node = resolveTrackNode(trace, uri);
+  const node = resolveTrackNode(trace, uri, uriNode);
   if (!node) return [];
   // Any grouping node (headless container, process or summary group — i.e.
   // a node with children) expands to its leaf tracks; a URI is either a
@@ -626,23 +640,6 @@ function resolveRenderableTrackNodes(
   return descendants;
 }
 
-/**
- * Map every track URI in the workspace to its tree depth (direct children of
- * the root are depth 0), used for shell indentation offscreen.
- */
-function buildUriDepthMap(root: TrackNode): Map<string, number> {
-  const map = new Map<string, number>();
-  const walk = (node: TrackNode, depth: number) => {
-    if (node.uri !== undefined && !map.has(node.uri)) {
-      map.set(node.uri, depth);
-    }
-    for (const child of node.children) {
-      walk(child, depth + 1);
-    }
-  };
-  walk(root, -1); // The root container itself is not a track level.
-  return map;
-}
 
 function clipText(
   ctx: CanvasRenderingContext2D,
@@ -659,34 +656,6 @@ function clipText(
 }
 
 /**
- * Group header rows: the interactive tree paints summary containers with a
- * tinted background across the whole row (collapsed and expanded use
- * different theme colors); expanded headers also flip their text color.
- * Drawn before shell text so the title renders on top.
- */
-function drawGroupHeaderRows(
-  ctx: CanvasRenderingContext2D,
-  boxes: ReadonlyArray<{
-    name: string;
-    top: number;
-    height: number;
-    isGroupHeader: boolean;
-    expanded: boolean;
-  }>,
-  cssWidth: number,
-): void {
-  ctx.save();
-  for (const box of boxes) {
-    if (!box.isGroupHeader || box.height <= 0) continue;
-    ctx.fillStyle = box.expanded
-      ? COLOR_TRACK_SUMMARY_EXPANDED
-      : COLOR_TRACK_SUMMARY_COLLAPSED;
-    ctx.fillRect(0, box.top, cssWidth, box.height);
-  }
-  ctx.restore();
-}
-
-/**
  * Track shell column: names indented by workspace depth, one line per track,
  * with row separators. A canvas-drawn simplification of the interactive
  * DOM shell (no expand arrows or hover affordances), matching its computed
@@ -700,8 +669,6 @@ function drawTrackShell(
     top: number;
     height: number;
     depth: number;
-    isGroupHeader: boolean;
-    expanded: boolean;
   }>,
   shellWidth: number,
   cssWidth: number,
@@ -715,10 +682,7 @@ function drawTrackShell(
   for (const box of boxes) {
     if (box.height <= 0) continue;
     const x = Math.max(0, box.depth) * SHELL_INDENT_PX + SHELL_TITLE_OFFSET_PX;
-    ctx.fillStyle =
-      box.isGroupHeader && box.expanded
-        ? COLOR_TRACK_SUMMARY_EXPANDED_TEXT
-        : COLOR_TEXT;
+    ctx.fillStyle = COLOR_TEXT;
     ctx.fillText(
       clipText(ctx, box.name, shellWidth - 4 - x),
       x,
@@ -792,15 +756,6 @@ function drawTimeAxis(
     }
   }
   ctx.restore();
-}
-
-function findNodeByUri(node: TrackNode, uri: string): TrackNode | undefined {
-  if (node.uri === uri) return node;
-  for (const child of node.children) {
-    const found = findNodeByUri(child, uri);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 interface SharedSurfaces {
@@ -926,8 +881,6 @@ function resizeCanvas(
 ): HTMLCanvasElement {
   canvas.width = Math.ceil(cssWidth * dpr);
   canvas.height = Math.ceil(cssHeight * dpr);
-  canvas.style.width = `${cssWidth}px`;
-  canvas.style.height = `${cssHeight}px`;
   return canvas;
 }
 
@@ -937,10 +890,9 @@ function createCanvas(
   dpr: number,
 ): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
+  // Offscreen-only: never attached to the DOM, so no style sizing.
   canvas.width = Math.ceil(cssWidth * dpr);
   canvas.height = Math.ceil(cssHeight * dpr);
-  canvas.style.width = `${cssWidth}px`;
-  canvas.style.height = `${cssHeight}px`;
   return canvas;
 }
 

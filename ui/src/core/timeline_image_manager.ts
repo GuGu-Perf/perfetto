@@ -36,18 +36,30 @@ export interface TimelineImageRenderOutput {
 }
 
 export type TimelineImageRenderFn = (
-  opts: Partial<TimelineImageOptions>,
+  opts: TimelineImageOptions,
 ) => Promise<TimelineImageRenderOutput>;
 
 export class TimelineImageManagerImpl implements TimelineImageManager {
   private renderer?: TimelineImageRenderFn;
+  // The offscreen renderer paints through module-level shared canvases, so
+  // renders must not overlap. The postMessage layer already serializes its
+  // queue; this chain extends the same guarantee to direct API callers.
+  private inFlight: Promise<unknown> = Promise.resolve();
 
   registerRenderer(fn: TimelineImageRenderFn): void {
     this.renderer = fn;
   }
 
-  async renderTimelineImage(
-    opts: Partial<TimelineImageOptions> = {},
+  renderTimelineImage(opts: TimelineImageOptions): Promise<TimelineImageResult> {
+    const run = this.inFlight.then(() => this.renderUnlocked(opts));
+    // Keep the chain alive when a render rejects; the error still
+    // propagates to the caller awaiting `run`.
+    this.inFlight = run.catch(() => undefined);
+    return run;
+  }
+
+  private async renderUnlocked(
+    opts: TimelineImageOptions,
   ): Promise<TimelineImageResult> {
     if (!this.renderer) {
       throw new Error(

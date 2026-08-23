@@ -87,8 +87,10 @@ export default class TimelinePlugin implements PerfettoPlugin {
  */
 async function renderTimelineImageAdapter(
   trace: TraceImpl,
-  opts: Partial<TimelineImageOptions>,
+  opts: TimelineImageOptions,
 ): Promise<TimelineImageRenderOutput> {
+  // TS callers are forced by the required field; the postMessage path feeds
+  // raw JSON into this signature, so validate again at the boundary.
   // Rendering is an act of deliberate selection; there is no default set.
   if (opts.trackUris === undefined || opts.trackUris.length === 0) {
     throw new Error(
