@@ -98,7 +98,7 @@ async function renderTimelineImageAdapter(
   // and merge into trackUris.
   // A trace can be loaded (traceInfo available) while plugins are still
   // building the workspace; rendering then would mis-report every URI as
-  // missing. Wait briefly for the first tracks to appear (plan T1.16).
+  // missing. Wait briefly for the first tracks to appear.
   const workspaceHasTracks = () => {
     let any = false;
     const visit = (n: TrackNode) => {
@@ -110,7 +110,7 @@ async function renderTimelineImageAdapter(
   };
   // isLoadingTrace stays true until loadTrace() resolves, which happens
   // only after every plugin's onTraceLoad has built its tracks: waiting on
-  // both closes the partial-workspace race (plan T1.16).
+  // both closes the partial-workspace race.
   const ready = () => !AppImpl.instance.isLoadingTrace && workspaceHasTracks();
   const waitDeadline = performance.now() + 30_000;
   while (!ready() && performance.now() < waitDeadline) {
@@ -166,10 +166,8 @@ async function renderTimelineImageAdapter(
     includeTrackShell: opts.includeTrackShell,
     includeTimeAxis: opts.includeTimeAxis,
   });
-  if (unmatchedNames.length > 0) {
-    if (!output.warnings.includes('TRACK_MISSING')) {
-      output.warnings.push('TRACK_MISSING');
-    }
+  if (unmatchedNames.length > 0 && !output.warnings.includes('TRACK_MISSING')) {
+    output.warnings = [...output.warnings, 'TRACK_MISSING'];
   }
   return output;
 }

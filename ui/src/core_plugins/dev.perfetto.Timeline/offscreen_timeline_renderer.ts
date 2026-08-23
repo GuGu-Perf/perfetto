@@ -40,6 +40,7 @@ import {TimeScale} from '../../base/time_scale';
 import {Time, type duration} from '../../base/time';
 import {formatDuration} from '../../components/time_utils';
 import type {TrackRenderContext} from '../../public/track';
+import type {TimelineImageWarning} from '../../public/timeline_image';
 import {TrackNode} from '../../public/workspace';
 import type {TraceImpl} from '../../core/trace_impl';
 import {Canvas2DRenderer} from '../../base/canvas2d_renderer';
@@ -58,7 +59,7 @@ import {
   TRACK_SHELL_WIDTH,
 } from '../../frontend/css_constants';
 import {traceEvent} from '../../core/metatracing';
-import {TrackView} from './track_view';
+import {DEFAULT_TRACK_MIN_HEIGHT_PX, TrackView} from './track_view';
 import {generateTicks, getMaxMajorTicks, TickType} from './gridline_helper';
 import {
   getDefaultCanvasColors,
@@ -73,7 +74,7 @@ const MAX_CANVAS_AREA_PX = 32_000_000;
 
 // Warm-up budget for fixed-point rounds after the first: later rounds only
 // wait for second-order queries, so a small cap keeps the worst case within
-// the "one minute per image" service budget (plan §1.4).
+// the per-image service budget.
 const SECOND_ROUND_BUDGET_MS = 5_000;
 
 // Visual constants, mirroring the interactive timeline:
@@ -156,13 +157,13 @@ export interface OffscreenTimelineRenderOutput {
   // Tracks whose data did not become ready within the per-track budget.
   readonly timedOutTracks: readonly string[];
   // Structured warning kinds (merged into the public result by the manager).
-  readonly warnings: string[];
+  warnings: readonly TimelineImageWarning[];
   // Effective device pixel ratio (after guardrail negotiation; may be lower
   // than requested on very tall compositions).
   readonly devicePixelRatio: number;
   // Number of fixed-point rounds actually executed.
   readonly rounds: number;
-  // Phase timings (ms), mirroring the metatrace event names (plan §6.5).
+  // Phase timings (ms), mirroring the metatrace event names.
   readonly perf: {loadMs: number; drawMs: number};
 }
 
@@ -220,7 +221,6 @@ export async function renderOffscreenTimeline(
     expanded: boolean;
   }[] = [];
   const missingTracks: string[] = [];
-  let truncatedByDefaultCap = false;
   // Track vertical bounds are canvas-absolute: they start below the time
   // axis row, as TrackView.drawCanvas places tracks at verticalBounds.top.
   let top = axisHeight;
@@ -271,12 +271,17 @@ export async function renderOffscreenTimeline(
     }
   }
   const seenUris = new Set<string>();
-  let truncated = false;
+  // Set when the zero-config default collection is cut short by the height
+  // cap; surfaced as a TRUNCATED warning on the public result.
+  let truncatedByDefaultCap = false;
   for (const {node, depth, uri, isGroupHeader, expanded} of entries) {
     // Only the zero-config default collection is capped; explicit
     // trackUris/trackNames sets are honored up to the canvas guardrail.
-    if (trackNodes !== undefined && top + nodeHeight(trace, node) > axisHeight + DEFAULT_MAX_HEIGHT_PX) {
-      truncated = true;
+    if (
+      trackNodes !== undefined &&
+      top + nodeHeight(trace, node) > axisHeight + DEFAULT_MAX_HEIGHT_PX
+    ) {
+      truncatedByDefaultCap = true;
       break;
     }
     // A headless URI expands to its leaf tracks, which may also appear
@@ -303,10 +308,6 @@ export async function renderOffscreenTimeline(
       `renderOffscreenTimeline: no renderable tracks ` +
         `(missing: ${missingTracks.join(', ')})`,
     );
-  }
-  if (truncated) {
-    // surfaced through the public result warnings by the adapter/manager
-    truncatedByDefaultCap = true;
   }
 
   // Webfonts load asynchronously with font-display: swap; drawing text
@@ -423,11 +424,11 @@ export async function renderOffscreenTimeline(
   // demanding a STABLE frame: (a) drawing can trigger data-dependent
   // second-order queries; (b) the interactive timeline's rAF redraws can
   // evict our memo entries across an await boundary, leaving a drawn frame
-  // based on stale/loading data (plan §3.3.3 phase B). A frame is considered
+  // based on stale/loading data. A frame is considered
   // final only when a redraw produces a pixel-identical probe hash.
   // Freeze interactive canvas redraws for the whole warm-up/draw/composite
   // critical section: a live UI redraw between our await points evicts the
-  // single-entry track memos and corrupts the frame (plan §3.3.3 phase B).
+  // single-entry track memos and corrupts the frame (phase-B eviction race).
   trace.raf.freezeCanvasRedraws();
   let rounds = 0;
   let lastHash: string | undefined;
@@ -559,7 +560,7 @@ export async function renderOffscreenTimeline(
     // interactive z-order. Composite via createImageBitmap rather than a
     // direct drawImage: after a canvas resize the 2D drawImage path can
     // serve a stale snapshot of the GL buffer (first readback only), while
-    // the bitmap path performs a fresh readback (plan T1.10 for root cause).
+    // the bitmap path performs a fresh readback.
     const glBitmap = await createImageBitmap(glCanvas);
     outCtx.drawImage(glBitmap, 0, 0);
     glBitmap.close();
@@ -573,8 +574,8 @@ export async function renderOffscreenTimeline(
     trackBoxes,
     timedOutTracks,
     warnings: [
-      ...(missingTracks.length > 0 ? ['TRACK_MISSING'] : []),
-      ...(truncatedByDefaultCap ? ['TRUNCATED'] : []),
+      ...(missingTracks.length > 0 ? (['TRACK_MISSING'] as const) : []),
+      ...(truncatedByDefaultCap ? (['TRUNCATED'] as const) : []),
     ],
     devicePixelRatio: dpr,
     rounds,
@@ -605,11 +606,16 @@ export function negotiateDpr(
 }
 
 // Approximate row height for the default-cap check without constructing a
-// TrackView: group headers are 18px, real tracks report their getHeight().
+// TrackView: mirrors getTrackHeight()'s rules (renderer height, floored at
+// the UI's minimum).
 function nodeHeight(trace: TraceImpl, node: TrackNode): number {
-  const renderer = node.uri ? trace.tracks.getWrappedTrack(node.uri)?.track : undefined;
+  const renderer = node.uri
+    ? trace.tracks.getWrappedTrack(node.uri)?.track
+    : undefined;
   const h = renderer?.getHeight?.();
-  return h === undefined ? 18 : Math.max(h, 18);
+  return h === undefined
+    ? DEFAULT_TRACK_MIN_HEIGHT_PX
+    : Math.max(h, DEFAULT_TRACK_MIN_HEIGHT_PX);
 }
 
 function resolveTrackNode(
@@ -764,7 +770,7 @@ function drawTrackShell(
  * Time axis row: trace span summary on the left (over the shell column) and
  * major ticks with two-line timecode labels over the content area, mirroring
  * TimeAxisPanel. All formatting is locale-independent (timecode rendering
- * only), keeping the output deterministic (plan T1.11).
+ * only), keeping the output deterministic.
  */
 function drawTimeAxis(
   ctx: CanvasRenderingContext2D,
@@ -877,7 +883,7 @@ function acquireSharedSurfaces(
   ) {
     // Recreate on size change as well: a resized WebGL canvas can serve a
     // corrupted first frame from its back buffer (browser resize-transition
-    // behaviour, see plan T1.10); a fresh context sidesteps the entire
+    // behaviour, see the resize-transition note above); a fresh context sidesteps the entire
     // class. Context churn is bounded by distinct sizes per session.
     disposeSharedSurfaces();
   }

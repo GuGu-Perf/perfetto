@@ -427,14 +427,16 @@ function handleRenderTimelineImage(
 ): void {
   if (renderInFlight) {
     if (renderQueue.length >= RENDER_QUEUE_CAP) {
-      const rejected = renderQueue.shift()!;
-      rejected.req = req;
-      rejected.reply({
+      // Bounded queue is full: fail the OLDEST request (its own caller gets
+      // the error) and enqueue the newest — never drop a reply silently.
+      const evicted = renderQueue.shift()!;
+      evicted.reply({
         action: 'renderTimelineImageResult',
-        id: rejected.req.id,
-        error: 'render queue full (32 pending requests)',
+        id: evicted.req.id,
+        error:
+          'render queue full (32 pending requests); oldest request evicted',
       });
-      renderQueue.push(rejected);
+      renderQueue.push({req, reply});
       return;
     }
     renderQueue.push({req, reply});

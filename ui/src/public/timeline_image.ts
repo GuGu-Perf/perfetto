@@ -87,8 +87,10 @@ export interface TimelineImageOptions {
    */
   readonly includeTimeAxis?: boolean;
   /**
-   * Per-track data loading budget in milliseconds. Tracks which do not
-   * settle in time are drawn as-is and reported via warnings/timeouts.
+   * Per-track data loading budget in milliseconds. The first warm-up round
+   * waits up to this budget per track; subsequent fixed-point rounds (which
+   * only settle second-order queries) are capped at 5s regardless. Tracks
+   * which do not settle are drawn as-is and reported via warnings.
    * Default: 5000.
    */
   readonly perTrackTimeoutMs?: number;
@@ -128,7 +130,7 @@ export interface TimelineImageResult {
   readonly devicePixelRatio: number;
   readonly trackBoxes: readonly TimelineImageTrackBox[];
   readonly warnings: readonly TimelineImageWarning[];
-  /** Phase timings in milliseconds (see plan §6.5 dual-trail observability). */
+  /** Phase timings in milliseconds (dual-trail with metatrace events). */
   readonly perf: {
     readonly loadMs: number;
     readonly drawMs: number;

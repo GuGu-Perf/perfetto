@@ -31,13 +31,16 @@ const JANK_FIXTURE_PATH = join(__dirname, '../../../test/data', JANK_FIXTURE);
 // file per case per run; Playwright only materializes attachments for
 // failed tests, so the spec persists the API output itself (appendix D.4).
 function artifactPath(caseName: string): string {
-  const dir = join(__dirname, '../../../timeline-image-dev/results/integration');
+  const dir = join(
+    __dirname,
+    '../../../timeline-image-dev/results/integration',
+  );
   mkdirSync(dir, {recursive: true});
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   return join(dir, `${ts}-${caseName}.png`);
 }
 
-// Windows measured on the fixture with trace_processor (see plan §6.1):
+// Windows measured on the fixture with trace_processor:
 // trace bounds 506729976821104 - 506737792493809, 21 janky frames, worst
 // frame ts=506731892411259 dur=62.7ms spanning the A1 window's left edge.
 const A1_WINDOW = {
@@ -94,7 +97,7 @@ test.skip(
 // eviction races are fixed (RafScheduler freeze) but MSAA rasterization
 // remains a suspected per-run variance source (antialias:false regressed
 // the non-solid assertions instead). Retry policy absorbs the residual
-// flake; root cause tracked in the plan (T1.10 follow-up).
+// flake; root cause tracked as known technical debt.
 test.describe.serial('timeline image rendering', () => {
   test.describe.configure({retries: 2});
   let helper: PerfettoTestHelper;
@@ -166,7 +169,7 @@ test.describe.serial('timeline image rendering', () => {
     for (const h of result.heights) {
       expect(h).toBeGreaterThan(0);
     }
-    // Dual-trail observability (plan §6.5): phase timings are populated and
+    // Dual-trail observability: phase timings are populated and
     // internally consistent.
     expect(result.perf.elapsedMs).toBeGreaterThan(0);
     expect(result.perf.loadMs).toBeGreaterThanOrEqual(0);
@@ -393,7 +396,7 @@ test.describe.serial('timeline image rendering', () => {
     // set (default-expanded workspace semantics) and, critically, the same
     // top-to-bottom ORDER, asserted against the live DOM's track titles.
     // This is the institutional guard against "parameter drift" between
-    // demo renders (plan v9.11): the default is defined by the UI, not by
+    // demo renders the default is defined by the UI, not by
     // whatever list a script happens to build.
     const result = await helper.page.evaluate(async () => {
       const trace = window.ctx as unknown as TestTrace;
