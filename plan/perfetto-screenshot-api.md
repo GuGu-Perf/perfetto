@@ -685,6 +685,7 @@ trace.pftrace
 | v9.5 | 2026-08-23 | 执行审计修正：D.4 增补 spec 产物路径并诚实登记六件套执行缺口；新立 T1.13（产物补齐）/T1.14（确定性残余 ⛔ 立账）；纠正变更流违规（代码先行、文档后补） |
 | v9.6 | 2026-08-23 | 人工 review 触发三缺陷修复并回归：B1 headless 容器零高度（离屏展开为叶子）、B2 CpuFreqTrack 窄窗口整条空白（补 whenDataReady+queryBounds）、warm-up 串行最坏 N×预算（并行化 + 后续轮 5s 上限，端到端 209ms/图）；timeSpan 字符串归一化入公共 API；新立 T1.15（track 覆盖率清单）/T1.16（workspace 时序竞争）；验证方法论新增像素级 band 分析（逐 track 非背景覆盖率 + 颜色数，自动检出空白带，替代肉眼 review 的不可靠性） |
 | v9.7 | 2026-08-23 | 需求对齐会话启动：UI 元素全景标注截图（out/test-runs/20260823-ui-element-survey，9 区域编号，用户勾选后映射 C1 include 开关）；T1.17 native tp 测试默认化完成（daemon + 自动协商，加载提速实测）；C1 差距再次确认（track 名称列 = 用户明确要求保留项） |
+| v9.8 | 2026-08-23 | C1 终态定稿（owner 决策经用户确认）：**allowlist 构造模型**取代组件排除矩阵——include 仅 `includeTrackShell`/`includeTimeAxis` 两项（默认 true），preset 三档移除（YAGNI），17 类组件清单降级为内部测试 checklist（T1.18）+ 文档 guarantee 契约（输出仅含时间线画布内容；无 DOM chrome/交互态/session 痕迹；同输入同输出）；弹窗免疫已实证（注入 modal 后输出逐字节不变）。**同日落地质件并合入**：名称列（250px、depth 缩进、单行省略、行分隔）+ 时间轴行（22px、Start/Span、Timecode 双行标签、locale 无关）离屏渲染，trackBoxes 增 depth；全关时与旧输出字节兼容；6/6 集成 + 2564 单测绿；step3 产物 out/test-runs/20260823-step3-shell-timeaxis（229ms，10/10 track 有内容） |
 | v9.4 | 2026-08-23 | 新增 §5.4 性能优化方法论与杠杆清单（top-down 闭环：测全链路→阶段归因→攻大头→单变量→复测；16 项杠杆按阶段分组，含渲染服务真机 GPU/ANGLE 杠杆及像素一致性权衡）；§1.4/§8.5 交叉引用 |
 
 ---
