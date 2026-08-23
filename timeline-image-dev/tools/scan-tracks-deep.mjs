@@ -1,7 +1,7 @@
 import {chromium} from '../../ui/node_modules/.pnpm/playwright@1.58.2/node_modules/playwright/index.mjs';
 import {writeFileSync, mkdirSync} from 'fs';
 import {execSync} from 'child_process';
-const OUT = new URL('../../', import.meta.url).pathname + 'out/test-runs/' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '-t1.15-scan-deep';
+const OUT = new URL('../../', import.meta.url).pathname + 'timeline-image-dev/results/' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '-t1.15-scan-deep';
 const browser = await chromium.launch();
 const page = await browser.newPage({viewport: {width: 1280, height: 800}});
 await page.goto('http://127.0.0.1:10000/?testing=1');

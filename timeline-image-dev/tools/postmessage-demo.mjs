@@ -15,14 +15,14 @@ setTimeout(() => { console.error(`HARD TIMEOUT after ${HARD_TIMEOUT_MS / 1000}s`
 const ROOT = new URL('../../', import.meta.url).pathname;
 const TRACE = process.argv[2] ?? ROOT + 'test/data/smartperfetto_android_scroll_jank_customer.pftrace';
 const UI = process.argv[3] ?? 'http://127.0.0.1:10000';
-const OUT = ROOT + 'out/test-runs/postmessage-demo';
+const OUT = ROOT + 'timeline-image-dev/results/postmessage-demo';
 mkdirSync(OUT, {recursive: true});
 
 // Institutional rule (T1.22): always start from an empty native-tp daemon —
 // a preloaded trace makes the UI show a confirmation modal at boot.
 try { execSync('pkill -f "trace_processor_shell -D"'); } catch {}
 execSync('sleep 1');
-execSync('nohup ./out/mac.release/trace_processor_shell -D > out/test-runs/native-tp.log 2>&1 &', {cwd: ROOT});
+execSync('nohup ./out/mac.release/trace_processor_shell -D > timeline-image-dev/results/native-tp.log 2>&1 &', {cwd: ROOT});
 execSync('sleep 2');
 
 const traceBuf = readFileSync(TRACE);

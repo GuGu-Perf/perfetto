@@ -16,14 +16,14 @@ const FIXTURES = [
   'smartperfetto_flutter_scroll_surface_view.pftrace',
   'example_android_trace.pftrace',
 ];
-const OUT = `${ROOT}out/test-runs/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-t1.15-scan`;
+const OUT = `${ROOT}timeline-image-dev/results/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-t1.15-scan`;
 mkdirSync(OUT, {recursive: true});
 
 function sh(cmd) { execSync(cmd, {cwd: ROOT, stdio: 'pipe'}); }
 function startEmptyDaemon() {
   try { sh('pkill -f "trace_processor_shell -D"'); } catch {}
   execSync('sleep 1');
-  sh('nohup ./out/mac.release/trace_processor_shell -D > out/test-runs/native-tp.log 2>&1 &');
+  sh('nohup ./out/mac.release/trace_processor_shell -D > timeline-image-dev/results/native-tp.log 2>&1 &');
   execSync('sleep 2');
 }
 

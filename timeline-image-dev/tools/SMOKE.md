@@ -1,6 +1,6 @@
 # 冒烟测试结果（一轮，最终版本 v9.22）
 
-> 截图：`out/test-runs/REPORT-ASSETS/smoke/<fixture>-<组名>.png`（12 张全部可打开）
+> 截图：`timeline-image-dev/results/REPORT-ASSETS/smoke/<fixture>-<组名>.png`（12 张全部可打开）
 > 命令：`node tools/timeline-image/smoke.mjs`（数据 smoke.json 同目录）
 
 ## S1 默认参数 `renderTimelineImage({widthPx: 1200, devicePixelRatio: 1})`

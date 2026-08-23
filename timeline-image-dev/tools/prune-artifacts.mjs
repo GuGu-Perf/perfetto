@@ -1,11 +1,11 @@
-// T1.13: retention policy for out/test-runs (plan D.4):
+// T1.13: retention policy for timeline-image-dev/results (plan D.4):
 // keep at most 50 run directories, at most 30 days old, at most 2GB total;
 // oldest first. LATEST symlinks and overlay-immunity evidence are pinned.
 import {readdirSync, statSync, unlinkSync, rmdirSync} from 'fs';
 import {join} from 'path';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
-const DIR = ROOT + 'out/test-runs';
+const DIR = ROOT + 'timeline-image-dev/results';
 const MAX_RUNS = 50;
 const MAX_AGE_DAYS = 30;
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;

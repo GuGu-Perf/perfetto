@@ -5,7 +5,7 @@
 //  - Every run: fresh empty native-tp daemon (no preloaded-trace popup),
 //    workspace-readiness wait, modal auto-dismiss safety net, engine
 //    evidence, six-piece artifacts (png/metadata/ui-reference/engine/
-//    run.json/log) under out/test-runs/<ts>-golden-<scenario>/.
+//    run.json/log) under timeline-image-dev/results/<ts>-golden-<scenario>/.
 import {chromium} from '../../ui/node_modules/.pnpm/playwright@1.58.2/node_modules/playwright/index.mjs';
 import {writeFileSync, mkdirSync, readFileSync, symlinkSync, rmSync, existsSync} from 'fs';
 import {execSync} from 'child_process';
@@ -66,7 +66,7 @@ function sh(cmd) { execSync(cmd, {cwd: ROOT, stdio: 'pipe'}); }
 function startEmptyDaemon() {
   try { sh('pkill -f "trace_processor_shell -D"'); } catch {}
   setTimeoutSync(1000);
-  sh('nohup ./out/mac.release/trace_processor_shell -D > out/test-runs/native-tp.log 2>&1 &');
+  sh('nohup ./out/mac.release/trace_processor_shell -D > timeline-image-dev/results/native-tp.log 2>&1 &');
   setTimeoutSync(2000);
 }
 function setTimeoutSync(ms) { execSync(`sleep ${ms / 1000}`); }
@@ -80,7 +80,7 @@ async function main() {
   }
   startEmptyDaemon();
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const out = `${ROOT}out/test-runs/${ts}-golden-${scenarioName}`;
+  const out = `${ROOT}timeline-image-dev/results/${ts}-golden-${scenarioName}`;
   mkdirSync(out, {recursive: true});
   const log = [];
   const t0 = Date.now();
@@ -169,8 +169,8 @@ async function main() {
       console.log('BASELINE MATCH ✓');
       // Refresh LATEST pointers to this verified run (T1.13).
       for (const [link, target] of [
-        [`${ROOT}out/test-runs/LATEST-png`, `${out}/golden.png`],
-        [`${ROOT}out/test-runs/LATEST-${scenarioName}.json`, `${out}/metadata.json`],
+        [`${ROOT}timeline-image-dev/results/LATEST-png`, `${out}/golden.png`],
+        [`${ROOT}timeline-image-dev/results/LATEST-${scenarioName}.json`, `${out}/metadata.json`],
       ]) {
         rmSync(link, {force: true});
         symlinkSync(target, link);

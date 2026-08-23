@@ -31,7 +31,7 @@ const JANK_FIXTURE_PATH = join(__dirname, '../../../test/data', JANK_FIXTURE);
 // file per case per run; Playwright only materializes attachments for
 // failed tests, so the spec persists the API output itself (appendix D.4).
 function artifactPath(caseName: string): string {
-  const dir = join(__dirname, '../../../out/ui/timeline_image_artifacts');
+  const dir = join(__dirname, '../../../timeline-image-dev/results/integration');
   mkdirSync(dir, {recursive: true});
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   return join(dir, `${ts}-${caseName}.png`);

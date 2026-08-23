@@ -4,7 +4,7 @@ import {execSync} from 'child_process';
 const T0 = Date.now();
 setTimeout(() => { console.error('HARD TIMEOUT 600s'); process.exit(3); }, 600_000);
 const ROOT = '/Users/vinson/CodeBuddy/Claw/myPerfetto/';
-const OUT = ROOT + 'out/test-runs/REPORT-ASSETS/smoke/';
+const OUT = ROOT + 'timeline-image-dev/results/REPORT-ASSETS/smoke/';
 mkdirSync(OUT, {recursive: true});
 const FIXTURES = ['example_android_trace.pftrace', 'smartperfetto_android_scroll_jank_customer.pftrace',
   'smartperfetto_android_scroll_standard.pftrace', 'smartperfetto_android_startup_heavy.pftrace',
@@ -13,7 +13,7 @@ const rows = [];
 for (const f of FIXTURES) {
   try { execSync('pkill -f "trace_processor_shell -D"'); } catch {}
   execSync('sleep 1');
-  execSync('nohup ./out/mac.release/trace_processor_shell -D > out/test-runs/native-tp.log 2>&1 &', {cwd: ROOT});
+  execSync('nohup ./out/mac.release/trace_processor_shell -D > timeline-image-dev/results/native-tp.log 2>&1 &', {cwd: ROOT});
   execSync('sleep 2');
   const browser = await chromium.launch();
   const page = await browser.newPage({viewport: {width: 1280, height: 800}});
