@@ -32,11 +32,14 @@ jobs:
           cache-dependency-path: ui/pnpm-lock.yaml
       - name: Install UI dependencies
         run: pnpm install --frozen-lockfile
+      - name: Generate ui/src/gen artifacts (no buildtools)
+        # Replaces the gn/ninja steps of ui/build.mjs for CI: real pbjs/pbts
+        # output for protos (byte-identical to the full build), checked-in
+        # .d.ts + throwing stub .js for the emscripten wasm modules (never
+        # instantiated by the unit suite). This also fixes the T1.34 tsc
+        # failure: src/gen was missing entirely on the runner.
+        run: node ci/gen_stubs.mjs
       - name: TypeScript check
-        # CI-only tsc failure under investigation (T1.34): identical command
-        # and lockfile pass locally. Non-blocking until the log channel is
-        # sorted; the vitest suite below is the hard gate.
-        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
@@ -49,6 +52,6 @@ jobs:
         run: |
           git config user.name 'ci-log-bot'
           git config user.email 'ci-log@localhost'
-          git add ui/tsc.log
+          git add tsc.log
           git commit -m 'ci: tsc log for run ${GITHUB_RUN_ID}'
           git push origin HEAD:ci-logs
