@@ -1,6 +1,6 @@
 # Timeline Image API — 测试用例与结果报告（含调用参数与截图）
 
-> 快照：2026-08-23 v9.22。截图位于 `timeline-image-dev/results/REPORT-ASSETS/`（已 pin 不会被 prune 清理）。
+> 快照：2026-08-23 v9.22。截图位于 [REPORT-ASSETS/](../results/REPORT-ASSETS/)（已 pin 不会被 prune 清理）。
 > 调用入口：页面内 `trace.timelineImage.renderTimelineImage(opts)`；外部经 postMessage（§6）。
 
 ## 1. 集成测试（9/9 通过）— 逐用例
@@ -16,7 +16,7 @@ renderTimelineImage({
 })
 ```
 - 期望：前两条为 RenderThread（state 18px + slice 132px）；各 band 颜色数 >10（非纯色）
-- 实际：✅ 通过；截图 `timeline-image-dev/results/REPORT-ASSETS/integration-a2-pinned.png`
+- 实际：✅ 通过；截图 [REPORT-ASSETS/integration-a2-pinned.png](../results/REPORT-ASSETS/integration-a2-pinned.png)
 - 完整产物目录：[results/integration/](../results/integration/)（每跑一次一个时间戳 PNG）
 
 ### 字节确定性
@@ -79,7 +79,7 @@ renderTimelineImage({
 })
 ```
 - 实际：1800×392、10 track、warnings=[]、~209ms API 耗时、BASELINE MATCH ✓
-- **截图**：`timeline-image-dev/results/REPORT-ASSETS/G-STD-golden.png`（API 输出）｜`G-STD-ui-reference.png`（浏览器同屏参照）
+- **截图**：[REPORT-ASSETS/G-STD-golden.png](../results/REPORT-ASSETS/G-STD-golden.png)（API 输出）｜`G-STD-ui-reference.png`（浏览器同屏参照）
 - 基线：[baselines/G-STD.json](baselines/G-STD.json)
 
 ### G-DEFAULT — 零参数语义
@@ -121,7 +121,7 @@ renderTimelineImage({
 
 ## 6. 全量官方套件（T1.29）
 - 干净全量 31 spec：13 过（含本 API 9/9）、39 失败=100% 像素基线 diff（环境性豁免，证据：全局雪花 diff 形态/零功能错误/抽样复跑功能全通）、40 链式跳过
-- 归因报告：`timeline-image-dev/results/2026-08-23T05-30-t1.29-full-regression/attribution.json` + 完整日志 `full-suite-clean.log`
+- 归因报告：[2026-08-23T05-30-t1.29-full-regression/attribution.json](../results/2026-08-23T05-30-t1.29-full-regression/attribution.json) + 完整日志 `full-suite-clean.log`
 - 典型 diff 样本：`out/ui/ui-test-results/test-load_and_tracks-load-trace-chromium/loaded-{expected,actual,diff}.png`
 
 ## 7. 性能实测

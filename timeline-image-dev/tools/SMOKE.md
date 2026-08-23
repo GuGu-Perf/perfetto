@@ -1,6 +1,6 @@
 # 冒烟测试结果（一轮，最终版本 v9.22）
 
-> 截图：`timeline-image-dev/results/REPORT-ASSETS/smoke/<fixture>-<组名>.png`（12 张全部可打开）
+> 截图（12 张，点击文件名可看）：目录 [results/REPORT-ASSETS/smoke/](../results/REPORT-ASSETS/smoke/)
 > 命令：[smoke.mjs](smoke.mjs)（数据 [smoke.json](../results/REPORT-ASSETS/smoke/smoke.json)）
 
 ## S1 默认参数 `renderTimelineImage({widthPx: 1200, devicePixelRatio: 1})`
@@ -8,12 +8,12 @@
 
 | Fixture | 实际尺寸 | track 数 | 耗时 | warnings | 截图 |
 |---|---|---|---|---|---|
-| example_android_trace | 1200×4768 | 134 | 1074ms | [] | smoke/example_android_trace-default.png |
-| scroll_jank_customer | 1200×6579 | 174 | 715ms | [] | smoke/smartperfetto_android_scroll_jank_customer-default.png |
-| scroll_standard | 1200×4584 | 124 | 541ms | [] | smoke/smartperfetto_android_scroll_standard-default.png |
-| startup_heavy | 1200×6640 | 177 | 740ms | [] | smoke/smartperfetto_android_startup_heavy-default.png |
-| startup_light | 1200×4138 | 115 | 520ms | [] | smoke/smartperfetto_android_startup_light-default.png |
-| flutter_scroll_surface_view | 1200×4784 | 129 | 786ms | [] | smoke/smartperfetto_flutter_scroll_surface_view-default.png |
+| example_android_trace | 1200×4768 | 134 | 1074ms | [] | [smoke/example_android_trace-default.png](../results/REPORT-ASSETS/smoke/example_android_trace-default.png) |
+| scroll_jank_customer | 1200×6579 | 174 | 715ms | [] | [smoke/smartperfetto_android_scroll_jank_customer-default.png](../results/REPORT-ASSETS/smoke/smartperfetto_android_scroll_jank_customer-default.png) |
+| scroll_standard | 1200×4584 | 124 | 541ms | [] | [smoke/smartperfetto_android_scroll_standard-default.png](../results/REPORT-ASSETS/smoke/smartperfetto_android_scroll_standard-default.png) |
+| startup_heavy | 1200×6640 | 177 | 740ms | [] | [smoke/smartperfetto_android_startup_heavy-default.png](../results/REPORT-ASSETS/smoke/smartperfetto_android_startup_heavy-default.png) |
+| startup_light | 1200×4138 | 115 | 520ms | [] | [smoke/smartperfetto_android_startup_light-default.png](../results/REPORT-ASSETS/smoke/smartperfetto_android_startup_light-default.png) |
+| flutter_scroll_surface_view | 1200×4784 | 129 | 786ms | [] | [smoke/smartperfetto_flutter_scroll_surface_view-default.png](../results/REPORT-ASSETS/smoke/smartperfetto_flutter_scroll_surface_view-default.png) |
 
 ## S2 常用调整（挑 track + 窗口 + 宽高比）
 ```ts
@@ -27,7 +27,7 @@ renderTimelineImage({
 
 | Fixture | 实际尺寸 | 比例 | track 数 | 耗时 | warnings | 截图 |
 |---|---|---|---|---|---|---|
-| example_android_trace | 323×242 | 1.335 | 8 | 178ms | [] | smoke/example_android_trace-tuned.png |
+| example_android_trace | 323×242 | 1.335 | 8 | 178ms | [] | [smoke/example_android_trace-tuned.png](../results/REPORT-ASSETS/smoke/example_android_trace-tuned.png) |
 | scroll_jank_customer | 323×242 | 1.335 | 8 | 142ms | [] | smoke/..._customer-tuned.png |
 | scroll_standard | 323×242 | 1.335 | 8 | 119ms | [] | smoke/..._standard-tuned.png |
 | startup_heavy | 323×242 | 1.335 | 8 | 139ms | [] | smoke/..._heavy-tuned.png |
