@@ -558,6 +558,63 @@ test.describe.serial('timeline image rendering', () => {
     expect(err).toContain('does not overlap trace bounds');
   });
 
+  test('dpr change with same css size keeps the GL layer full-width', async () => {
+    // Regression: the shared GL context survives same-size renders, but a
+    // dpr change resizes the drawing buffer. The GL viewport does not
+    // follow buffer resizes — without an explicit reset, the GL layer was
+    // drawn into the stale (pre-resize) viewport rect, leaving most of the
+    // canvas empty on the second render.
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      const opts = (devicePixelRatio: number) => ({
+        trackUris: ['/thread_7303', '/sched_cpu0'],
+        timeSpan,
+        widthPx: 800,
+        devicePixelRatio,
+      });
+      // Prime at dpr 1, then render the same composition at dpr 2: the
+      // buffer GROWS, so a stale viewport is no longer clamped to the full
+      // buffer and the GL layer lands in the bottom-left corner only.
+      await trace.timelineImage.renderTimelineImage(opts(1));
+      const r = await trace.timelineImage.renderTimelineImage(opts(2));
+      const bmp = await createImageBitmap(r.blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(bmp, 0, 0);
+      const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      // Colors in the RIGHT half of the content area (past the shell): if
+      // the viewport were stale (2x rect on a 1x buffer) this region would
+      // be pure background.
+      const colors = new Set<string>();
+      for (
+        let y = 0;
+        y < canvas.height;
+        y += Math.max(1, Math.floor(canvas.height / 60))
+      ) {
+        for (
+          let x = Math.floor(canvas.width * 0.6);
+          x < Math.floor(canvas.width * 0.95);
+          x += 4
+        ) {
+          const i = (y * canvas.width + x) * 4;
+          colors.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+        }
+      }
+      return {
+        width: r.width,
+        height: r.height,
+        warnings: [...r.warnings],
+        rightHalfColors: colors.size,
+      };
+    }, A2_WINDOW);
+    expect(result.warnings).toEqual([]);
+    expect(result.width).toBe(800);
+    expect(result.rightHalfColors).toBeGreaterThan(2);
+  });
+
   test('concurrency: two overlapping renders both succeed, byte-identical', async () => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;

@@ -774,18 +774,8 @@ interface SharedSurfaces {
 const MAX_RENDERS_PER_CONTEXT = 200;
 
 let sharedSurfaces: SharedSurfaces | undefined;
-let contextsCreated = 0;
-
-export function getOffscreenSurfaceStats(): {
-  renders: number;
-  contextsCreated: number;
-} {
-  return {renders: sharedSurfaces?.renders ?? 0, contextsCreated};
-}
 
 export interface AcquiredSurfaces {
-  surfaces?: SharedSurfaces;
-  sizeChanged: boolean;
   d2Canvas: HTMLCanvasElement;
   d2Ctx: CanvasRenderingContext2D;
   glCanvas?: HTMLCanvasElement;
@@ -827,7 +817,6 @@ function acquireSharedSurfaces(
       // No singleton needed in this mode.
       const canvas = resizeCanvas(d2Canvas, cssWidth, cssHeight, dpr);
       return {
-        sizeChanged: true,
         d2Canvas: canvas,
         d2Ctx,
         renderer: new Canvas2DRenderer(d2Ctx),
@@ -843,19 +832,23 @@ function acquireSharedSurfaces(
       lastWidth: 0,
       lastHeight: 0,
     };
-    contextsCreated++;
   }
   sharedSurfaces.renders++;
-  const sizeChanged =
-    sharedSurfaces.lastWidth !== cssWidth ||
-    sharedSurfaces.lastHeight !== cssHeight;
   resizeCanvas(sharedSurfaces.d2Canvas, cssWidth, cssHeight, dpr);
   resizeCanvas(sharedSurfaces.glCanvas, cssWidth, cssHeight, dpr);
+  // The GL viewport defaults to the canvas size at context creation and does
+  // NOT follow drawing-buffer resizes (same-CSS-size renders at a different
+  // dpr resize the buffer without recreating the context). Reset it on
+  // every resize, exactly like the interactive path does.
+  sharedSurfaces.glCtx.viewport(
+    0,
+    0,
+    sharedSurfaces.glCanvas.width,
+    sharedSurfaces.glCanvas.height,
+  );
   sharedSurfaces.lastWidth = cssWidth;
   sharedSurfaces.lastHeight = cssHeight;
   return {
-    surfaces: sharedSurfaces,
-    sizeChanged,
     d2Canvas: sharedSurfaces.d2Canvas,
     d2Ctx: sharedSurfaces.d2Ctx,
     glCanvas: sharedSurfaces.glCanvas,
