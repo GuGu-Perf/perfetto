@@ -82,7 +82,7 @@ iframe.contentWindow.postMessage(
           // the thread's capability tracks.
           trackUris: ['/sched_cpu0', '/thread_7303', '/cpu_freq_cpu0'],
           timeSpan: {start: '3428202643641', end: '3428410622726'},
-          aspectRatio: 4 / 3,
+          widthPx: 1600,
         },
       },
     },
@@ -128,13 +128,12 @@ metadata: dimensions, effective `devicePixelRatio`, per-track bounding boxes
 ## What the image contains
 
 - The track shell column (names, indentation) and the time axis, matching
-  the interactive timeline's look. Both can be turned off
-  (`includeTrackShell: false`, `includeTimeAxis: false`).
+  the interactive timeline's look. Both are always drawn — they are part of
+  what a timeline image is, not options.
 - Only timeline content. Page chrome, interaction state (hover, selection)
   and overlays are structurally excluded, not hidden.
-- Data fetched at the canvas's resolution, bounded per track
-  (`perTrackTimeoutMs`, default 5s). Tracks that do not settle in time are
-  drawn as-is and reported via a `TIMEOUT` warning.
+- Data loading is bounded per track by an internal budget; tracks that do
+  not settle in time are drawn as-is and reported via a `TIMEOUT` warning.
 
 ## Troubleshooting
 

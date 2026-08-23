@@ -138,10 +138,9 @@ Semantics:
   trace are queued internally (up to 60s), so no "loaded" handshake is
   needed. Rendering itself additionally waits for all trace plugins to
   finish building the workspace (up to 30s).
-- **Default composition cap**: with no explicit `trackUris`/`trackNames`,
-  the default track set is truncated at 2160 CSS px of height and the
-  result carries a `TRUNCATED` warning; request an explicit track set for
-  everything.
+- **Selection is explicit**: `trackUris` is required; unknown URIs reject
+  the render with an error listing them. `TRUNCATED` appears only when a
+  `heightPx` smaller than the content clips it.
 - **Bounded queue**: one render runs at a time; up to 32 requests queue. The
   oldest request is rejected (`error: 'render queue full'`) rather than
   silently dropped.
