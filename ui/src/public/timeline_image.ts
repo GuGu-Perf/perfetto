@@ -118,6 +118,8 @@ export interface TimelineImageResult {
   readonly blob: Blob;
   readonly width: number;
   readonly height: number;
+  /** Effective device pixel ratio (may be downgraded on very tall outputs). */
+  readonly devicePixelRatio: number;
   readonly trackBoxes: readonly TimelineImageTrackBox[];
   readonly warnings: readonly TimelineImageWarning[];
   /** Phase timings in milliseconds (see plan §6.5 dual-trail observability). */

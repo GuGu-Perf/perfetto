@@ -15,7 +15,7 @@
 import {createFakeTraceImpl} from '../../core/fake_trace_impl';
 import {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
 import {Time} from '../../base/time';
-import {renderOffscreenTimeline} from './offscreen_timeline_renderer';
+import {negotiateDpr, renderOffscreenTimeline} from './offscreen_timeline_renderer';
 
 // jsdom has no canvas implementation, so full rendering cannot run here;
 // these tests cover the pure validation & layout logic that runs before
@@ -31,6 +31,22 @@ test('empty track list throws with missing uris listed', async () => {
       widthPx: 100,
     }),
   ).rejects.toThrow('/does/not/exist');
+});
+
+test('guardrail downgrades dpr to 1 on tall compositions', () => {
+  // 5000 x 3000: @2x = 60M px > 32M, @1x = 15M px fits.
+  expect(negotiateDpr(5000, 3000, 2)).toBe(1);
+  // Fits as requested: unchanged.
+  expect(negotiateDpr(1920, 1080, 2)).toBe(2);
+  // Edge overflow at 2x (18000 > 16384) but fine at 1x (27M px).
+  expect(negotiateDpr(9000, 3000, 2)).toBe(1);
+});
+
+test('guardrail still rejects shapes overflowing at 1x', () => {
+  // 1000 x 20000 overflows the 16384 edge even at 1x.
+  expect(() => negotiateDpr(1000, 20_000, 2)).toThrow('too large');
+  // Pure area overflow at 1x (both edges fine).
+  expect(() => negotiateDpr(8000, 8000, 1)).toThrow('too large');
 });
 
 test('widthPx and aspectRatio are mutually exclusive', async () => {

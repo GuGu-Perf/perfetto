@@ -152,6 +152,9 @@ export interface OffscreenTimelineRenderOutput {
   readonly timedOutTracks: readonly string[];
   // Structured warning kinds (merged into the public result by the manager).
   readonly warnings: string[];
+  // Effective device pixel ratio (after guardrail negotiation; may be lower
+  // than requested on very tall compositions).
+  readonly devicePixelRatio: number;
   // Number of fixed-point rounds actually executed.
   readonly rounds: number;
   // Phase timings (ms), mirroring the metatrace event names (plan §6.5).
@@ -299,17 +302,9 @@ export async function renderOffscreenTimeline(
     (aspectRatio !== undefined
       ? Math.round(cssHeight * aspectRatio)
       : DEFAULT_WIDTH_PX);
-  const pixels = cssWidth * devicePixelRatio * cssHeight * devicePixelRatio;
-  if (
-    cssWidth * devicePixelRatio > MAX_CANVAS_EDGE_PX ||
-    cssHeight * devicePixelRatio > MAX_CANVAS_EDGE_PX ||
-    pixels > MAX_CANVAS_AREA_PX
-  ) {
-    throw new Error(
-      `renderOffscreenTimeline: output canvas too large ` +
-        `(${cssWidth}x${cssHeight} @${devicePixelRatio}x)`,
-    );
-  }
+  // With many tracks (tall canvas) the default dpr 2 can exceed the browser
+  // canvas limits; negotiate rather than failing a zero-config call.
+  const dpr = negotiateDpr(cssWidth, cssHeight, devicePixelRatio);
 
   // Data resolution: like the interactive path, quantized to a power of two,
   // but computed for `cssWidth / dataResolutionScale` so that (with the
@@ -336,7 +331,7 @@ export async function renderOffscreenTimeline(
   const {d2Canvas, d2Ctx, glCanvas, glCtx, renderer} = acquireSharedSurfaces(
     cssWidth,
     cssHeight,
-    devicePixelRatio,
+    dpr,
   );
 
   const colors = getDefaultCanvasColors();
@@ -489,8 +484,8 @@ export async function renderOffscreenTimeline(
     renderer.resetTransform();
     renderer.clear();
     using _transform = renderer.pushTransform({
-      scaleX: devicePixelRatio,
-      scaleY: devicePixelRatio,
+      scaleX: dpr,
+      scaleY: dpr,
     });
     renderTimelineCanvas({
       ctx: d2Ctx,
@@ -536,7 +531,7 @@ export async function renderOffscreenTimeline(
 
   // -------------------------------------------------------------- composite
   traceEvent('TimelineImage.e2e', () => {}, {args: {rounds: String(rounds)}});
-  const outCanvas = createCanvas(cssWidth, cssHeight, devicePixelRatio);
+  const outCanvas = createCanvas(cssWidth, cssHeight, dpr);
   const outCtx = ensure2d(outCanvas);
   outCtx.fillStyle = COLOR_BACKGROUND;
   outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
@@ -559,9 +554,32 @@ export async function renderOffscreenTimeline(
     trackBoxes,
     timedOutTracks,
     warnings: missingTracks.length > 0 ? ['TRACK_MISSING'] : [],
+    devicePixelRatio: dpr,
     rounds,
     perf: {loadMs, drawMs},
   };
+}
+
+/**
+ * Guardrail negotiation for the output canvas: if the requested pixel
+ * density overflows the browser canvas limits, downgrade to 1x (the result
+ * reports the effective value); only shapes overflowing even at 1x throw.
+ */
+export function negotiateDpr(
+  cssWidth: number,
+  cssHeight: number,
+  requestedDpr: number,
+): number {
+  const fits = (dpr: number) =>
+    cssWidth * dpr <= MAX_CANVAS_EDGE_PX &&
+    cssHeight * dpr <= MAX_CANVAS_EDGE_PX &&
+    cssWidth * dpr * cssHeight * dpr <= MAX_CANVAS_AREA_PX;
+  if (fits(requestedDpr)) return requestedDpr;
+  if (requestedDpr > 1 && fits(1)) return 1;
+  throw new Error(
+    `renderOffscreenTimeline: output canvas too large ` +
+      `(${cssWidth}x${cssHeight} @${requestedDpr}x)`,
+  );
 }
 
 function resolveTrackNode(

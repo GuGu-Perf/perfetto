@@ -31,6 +31,7 @@ export interface TimelineImageRenderOutput {
   readonly trackBoxes: readonly TimelineImageTrackBox[];
   readonly timedOutTracks: readonly string[];
   readonly warnings: string[];
+  readonly devicePixelRatio?: number;
   readonly perf?: {loadMs: number; drawMs: number};
 }
 
@@ -70,6 +71,7 @@ export class TimelineImageManagerImpl implements TimelineImageManager {
       width: output.width,
       height: output.height,
       trackBoxes: output.trackBoxes,
+      devicePixelRatio: output.devicePixelRatio ?? opts.devicePixelRatio ?? 2,
       warnings,
       perf: {
         loadMs: output.perf?.loadMs ?? 0,
