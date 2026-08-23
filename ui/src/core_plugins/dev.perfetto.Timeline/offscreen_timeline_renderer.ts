@@ -526,6 +526,11 @@ export async function renderOffscreenTimeline(
       resolutionOverride: resolution,
       includeGrid: true,
       includeSessionOverlays: false,
+      // The interactive tree indents each row's content by depth * 8px
+      // (track_shell.scss grid); mirror it so x-coordinates align with the
+      // live UI (asserted by the differential test).
+      trackIndent: (view) =>
+        Math.max(0, uriDepth.get(view.node.uri ?? '') ?? 0) * SHELL_INDENT_PX,
     });
     // Decorations are drawn after the timeline content, in the same CSS
     // coordinate space (the dpr transform above applies to the 2D ctx too).

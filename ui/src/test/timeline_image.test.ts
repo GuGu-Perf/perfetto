@@ -433,6 +433,44 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.offscreenHead.slice(0, k)).toEqual(result.uiHead.slice(0, k));
   });
 
+  test('G2: row geometry matches the live UI DOM', async () => {
+    // Positional consistency oracle: every band the API renders must land
+    // at the same y/height as the same-named row in the interactive tree
+    // (within 1px). Guards against layout drift without any pixel oracle.
+    const result = await helper.page.evaluate(async () => {
+      const trace = window.ctx as unknown as TestTrace;
+      const r = await trace.timelineImage.renderTimelineImage({
+        widthPx: 1690,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 30_000,
+      });
+      const first = document.querySelector('.pf-track');
+      const clipY = first ? first.getBoundingClientRect().y : 172;
+      const rows = [...document.querySelectorAll('.pf-track__header')]
+        .map((e) => {
+          const b = e.getBoundingClientRect();
+          return {
+            name: (e.querySelector('.pf-track__title')?.textContent ?? '').trim(),
+            top: b.y - clipY,
+            height: b.height,
+          };
+        })
+        .filter((x) => x.name.length > 0 && x.height > 0 && x.top >= -2 && x.top < 620)
+        .slice(0, 12);
+      // API bands exclude the 22px time-axis row from this comparison.
+      const bands = r.trackBoxes
+        .slice(0, rows.length)
+        .map((b) => ({name: b.name, top: b.top - 22, height: b.height}));
+      return {rows, bands};
+    });
+    expect(result.rows.length).toBeGreaterThanOrEqual(6);
+    for (let i = 0; i < result.rows.length; i++) {
+      expect(result.bands[i].name).toBe(result.rows[i].name);
+      expect(Math.abs(result.bands[i].top - result.rows[i].top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(result.bands[i].height - result.rows[i].height)).toBeLessThanOrEqual(1);
+    }
+  });
+
   test('T1.27/T1.28: trackNames resolution + aspectRatio shape', async () => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;

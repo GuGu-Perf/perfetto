@@ -25,7 +25,7 @@
  */
 
 import {hex} from 'color-convert';
-import {type Rect2D, type Size2D, Transform1D} from '../../base/geom';
+import {Rect2D, type Size2D, Transform1D} from '../../base/geom';
 import type {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
 import type {duration, time} from '../../base/time';
 import type {TimeScale} from '../../base/time_scale';
@@ -96,6 +96,8 @@ export interface TimelineCanvasRenderArgs {
   // consumers producing deterministic output set this to false.
   // Default: true.
   readonly includeSessionOverlays?: boolean;
+  // See drawTracksOnCanvas's trackIndent parameter.
+  readonly trackIndent?: (view: TrackView) => number;
 }
 
 export interface TimelineCanvasRenderResult {
@@ -143,6 +145,7 @@ export function renderTimelineCanvas(
     args.perfStatsEnabled,
     args.trackPerfStats,
     args.resolutionOverride,
+    args.trackIndent,
   );
 
   renderFlows(
@@ -263,6 +266,10 @@ export function drawTracksOnCanvas(
   perfStatsEnabled: boolean,
   trackPerfStats: WeakMap<TrackNode, PerfStats>,
   resolutionOverride?: duration,
+  // Optional per-track left indent (CSS px) applied to the track's rect,
+  // mirroring the interactive tree's depth indentation. Interactive callers
+  // omit it (zero indent, unchanged behavior).
+  trackIndent?: (view: TrackView) => number,
 ): number {
   let tracksOnCanvas = 0;
   for (const trackView of renderedTracks) {
@@ -274,9 +281,14 @@ export function drawTracksOnCanvas(
         right: size.width,
       })
     ) {
+      const indent = trackIndent ? trackIndent(trackView) : 0;
+      const rect =
+        indent > 0
+          ? new Rect2D({...timelineRect, left: timelineRect.left + indent})
+          : timelineRect;
       trackView.drawCanvas(
         ctx,
-        timelineRect,
+        rect,
         visibleWindow,
         perfStatsEnabled,
         trackPerfStats,
