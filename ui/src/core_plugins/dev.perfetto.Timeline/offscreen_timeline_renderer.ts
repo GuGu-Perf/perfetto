@@ -204,6 +204,13 @@ export async function renderOffscreenTimeline(
     throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
   }
 
+  // Webfonts load asynchronously with font-display: swap; drawing text
+  // before they are ready would use fallback glyphs and differ between
+  // renders, breaking determinism (and visual parity with the live UI).
+  if (typeof document !== 'undefined') {
+    await document.fonts.ready;
+  }
+
   const cssWidth = widthPx;
   const cssHeight = top;
   const pixels = cssWidth * devicePixelRatio * cssHeight * devicePixelRatio;
