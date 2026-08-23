@@ -299,9 +299,16 @@ interface TimelineImageResult {
 - **插入点**：`postMessageHandler` 是 if/return 顺序链，照 `PostedScrollToRangeWrapped` 的"类型守卫 + 提前 return"模式在 scrollTo 分支后插入；未被识别的消息落入 "Unknown postMessage() event" 警告并丢弃——消息名拼错时是静默失败，协议文档需强调。
 - **信任模型与部署约束**：复用 `isTrustedOrigin()`（localhost 永远信任；非信任 origin 弹确认框）——渲染服务必须与 UI 同机（localhost）或宿主经授权，详见 §8.1。
 
-**(b) Command**——`dev.perfetto.CoreCommands`（或新插件）注册：`dev.perfetto.RenderScreenshot`（当前视口全 track）、`dev.perfetto.RenderScreenshotOfSelection`（当前选区）。人肉场景直接用，同时天然被 startupCommands 宏系统支持。
+**(b) Command——❌ 已否决（ADR-14，v9.32）**。原假设"人肉场景需要命令面板出图"；证据=正在看 UI 的人手动截图带页面上下文反而更有用，要干净图走 (a)/(c) 任意入口皆可；替代路径=DevTools console 直调 L2 原语。原设计（`dev.perfetto.CoreCommands` 注册 `RenderScreenshot`/`RenderScreenshotOfSelection`）仅保留备忘，不再实现。
 
-**(c) MCP tool（PR 3 候选）**：将 `renderTimelineImage` 暴露为 `com.google.PerfettoMcp` 的一个 tool，AI agent/自动化工具可经标准 MCP 协议调用（MCP 协议原生支持 image content block）。官方已在该方向投入，截图作为其图像输出能力是自然延伸，**可能比扩展 postMessage 更易获得维护者认可**。待确认项：`PerfettoMcp` 的 server 架构（页面内 localhost socket 还是独立进程）决定外部进程能否直达该 tool——PR 1 落地后凭效果与维护者讨论并核实。
+**(c) MCP tool——v9.32 方向修正为"官方 ToolRegistry 内增量注册"，已核实架构**。源码核验（`com.google.PerfettoMcp/`）：官方 MCP 是 **UI 进程内**实现——`ToolRegistry`（tool_registry.ts，对齐 @modelcontextprotocol/sdk 的 `McpServer.tool()` 签名：zod schema + handler）+ 内置 Gemini 聊天页（`/aichat`，用户 token）消费工具；既有工具 `query` / `show-perfetto-sql-view` / `show-timeline`。**无独立 server 进程、无 localhost socket**——外部进程不直达，消费端是 UI 内 LLM 客户端。
+
+实现设计（增量、零新通道）：
+1. 新文件 `timeline_tools.ts`（照 `uitools.ts` 风格）：注册 `render-timeline-image` 工具（zod schema 1:1 映射 `TimelineImageOptions`，时间戳字符串），handler 调 `ctxt.timelineImage.renderTimelineImage()`——L2 原语已挂 `Trace` 公共 API（`trace.timelineImage`），无缝衔接。
+2. `index.ts` 加一行注册；可选第二工具 `list-tracks`（防呆前置，语义同 `show-timeline` 写法）。
+3. `ToolResult` 现仅支持 `type:'text'`——扩展支持 MCP 标准的 `type:'image'` content（base64 PNG），聊天页渲染返回图像。
+
+上游可提交性恢复：给既有 MCP 插件加工具完全顺着官方演进方向（ADR-14 一并推翻 v9.31 前的"外部 stdio server"构想——那是调用方基建思路，违反"无中生有"禁令，感谢用户质询拦下）。
 
 **(d) URL 深链接（降级语义）**：`?renderTimelineImage=1` 不承担"自动回传取图"（顶层窗口无回传目标、浏览器拦截无手势下载、headless 无人点击——取图闭环不成立）。降级语义：渲染完成后在页面内**生成下载链接 + postMessage 通知**（iframe 场景）；真正的自动化取图一律走 (a)。首版可完全砍掉，留作 PR 3 的便利性增强。
 
@@ -680,6 +687,7 @@ trace.pftrace
 | 11 | 拆出 PR 0（纯重构）先行 | 缩小 PR 1 diff（大 PR 是上游接受负向因子）；提前稳定冲突高发点① | v9.2 |
 | 12 | AGPL fixture 仅限本地，上游测试用合成 trace | AGPL-3.0 数据不能进 Apache-2.0 上游仓库（许可证污染） | v9.2 |
 | 13 | 观测复用 perfetto 既有体系（traceEvent/queryLog/sqlstats/metatrace），不自建计时 | traceEvent API 零调用方可直接成为首个消费者；TP 侧计时为实测值；metatrace 输出即 proto trace 可回载分析 | v9.3 |
+| 14 | L3 入口收敛为两个：postMessage + MCP tool；Command 面板砍掉；MCP = 官方 `com.google.PerfettoMcp` ToolRegistry 内注册 `render-timeline-image` 工具，**不建外部 stdio server** | 用户质询触发双向修正：① Command 纯上游叙事性、自用无场景（正在看 UI 的人手动截图上下文更有用）；② 外部 server 方案违反"遵循既有架构，不无中生有"——源码核验官方 MCP 是 UI 进程内 ToolRegistry + 内置 LLM 客户端，正确姿势是增量加工具；原语已挂 `trace.timelineImage` 使 handler 零适配 | v9.32 |
 
 ## 附录 C：修订史
 
@@ -705,6 +713,7 @@ trace.pftrace
 | v9.17 | 08-23 | T1.23 护栏协商（dpr 自动降级） |
 | v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
 | v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
+| v9.32 | 08-23 | **L3 入口收敛（ADR-14）+ MCP 方向修正**：用户两轮质询（"Command 有必要吗""既有架构是什么"）触发——Command 面板砍掉（❌，防呆/叙事性论证见 ADR-14）；MCP 方案推翻"外部 stdio server"初稿（曾写 MCP-ENTRY-DESIGN.md，已删并按用户要求文档统一回 PLAN），源码核验官方 `com.google.PerfettoMcp` 架构（UI 进程内 ToolRegistry + zod 工具 + 内置 Gemini 聊天页消费，无独立 server 进程），修正为增量注册 `render-timeline-image` 工具（新 timeline_tools.ts 照 uitools.ts 风格 + ToolResult 扩 image content + 可选 list-tracks）；上游可提交性恢复（给既有插件加工具=顺应官方演进）。设计更新至 §3.5(b)(c)，任务表 T3.1 ❌ / T3.2 落地路径刷新 |
 | v9.31 | 08-23 | **T1.29-b/c 关闭：Playwright 全量首跑 + 完整归因**。全量被阻根因=本机 9001 端口残留的旧版 `trace_processor --httpd`（native-tp 实验遗留）——UI 探测到即自动切 HTTP+RPC 引擎，旧版 TP websocket 协议不合致无限重连、trace 永打不开且零报错；kill 后引擎回 WASM 模式。另两个次生障碍一并清除：emscripten 需 Python≥3.10（装 uv+3.12，EMSDK_PYTHON 注入）；本地 `ui/src/gen` 真实目录挡 mklink（已删）。全量结果（mac 本地）：18 passed / 52 failed / 40 did-not-run（serial 级联），**52 个失败 100% 为像素基线 diff（28 page 级 + 24 locator 级），零功能性失败**——与 T1.29 盘点一致（官方基线 Linux-only，mac 跨机 diff 官方已知）。结论：功能面全绿，像素类失败环境性豁免成立；全量套件职责移交 fork CI（Linux runner）。同日交付：使用文档 walkthrough《Exporting a Timeline Image》（docs/visualization/，官方 reference+walkthrough 配对惯例，toc 注册+交叉链接）+ 全部改动文件 eslint 清零 |
 | v9.20 | 08-23 | 文档结构治理：修订史/任务表瘦身、D.5 执行日志新增、设计区与实现同步 |
 | v9.30 | 08-23 | **T1.34 关闭 + fork CI 首绿**：gh 通道永久落地（免 sudo 装二进制至 ~/.local/bin，两次设备授权补 repo+workflow scope，keyring 存凭据）；日志到手即定根因——44 个失败测试文件同一 vite 错误 `Failed to resolve import "../gen/protos"`，即 runner 上 `ui/src/gen` 缺失（完整构建由 gn/ninja 产出+symlink），tsc 之谜同因；修复=`ui/ci/gen_stubs.mjs`（pbjs/pbts 生成 protos 与完整构建逐字节一致，四个 emscripten wasm 模块用 checked-in .d.ts+抛错 stub .js，单测从不实例化），本地验证 vitest 153/153、tsc 零错误后推送，run 32637330205 全绿，tsc 恢复硬门；顺手修 ci-logs 发布步骤路径 bug（ui/tsc.log→tsc.log） |
@@ -814,8 +823,8 @@ trace.pftrace
 
 | ID | 任务 | 验收标准 | 依赖 | 状态 | 产出物 | 备注 |
 |---|---|---|---|---|---|---|
-| T3.1 | Command（RenderScreenshot / OfSelection）+ 下载 UI | 命令面板可用人肉出图 | M1 | ⬜ | commit | |
-| T3.2 | MCP tool（对齐后） | MCP 调用返回 image content | T0.2 结论 | ⬜ | commit | server 架构先核实，§3.5(c) |
+| T3.1 | Command（RenderScreenshot / OfSelection）+ 下载 UI | ~~命令面板可用人肉出图~~ | M1 | ❌ | — | v9.32/ADR-14：原假设=人肉需要面板出图；证据=手动截图带上下文反而更有用，干净图可走 postMessage/MCP；替代路径=DevTools console 直调 L2 原语 |
+| T3.2 | MCP tool：PerfettoMcp ToolRegistry 注册 `render-timeline-image`（+ToolResult image content 扩展、可选 `list-tracks`） | `/aichat` 内 LLM 调工具返回内联 PNG；单测覆盖 schema 映射与 handler | M1 | ⬜ | commit | 架构已核实（v9.32，§3.5(c)）：无独立 server，消费端=UI 内置 Gemini；依赖=`trace.timelineImage` 原语（已就绪） |
 | T3.3 | trackNamePatterns | 按名选 track；SF [NULL] 线程名边界用例过 | M1 | ⬜ | commit | §6.1 A1 参数集 |
 | T3.4 | 性能验收 + CI 看护固化 | §6.4 基准全过；软阈值（×2 告警/×3 阻断）入库 | M1 | ⬜ | CI 配置 | |
 | T3.5 | 渲染服务样板（长驻 headless + §8.2 流水线） | 5 fixture 批量出图成功 | T2.3 | ⬜ | 样板仓库 | 调用方基建，不进上游 |
@@ -849,6 +858,7 @@ trace.pftrace
 
 | 日期 | 主体 | 叙事与指针 |
 |---|---|---|
+| 08-23 | L3 收敛 (ADR-14) | 用户质询"Command 有必要吗"→砍（正在看 UI 者截图上下文更有用）；再质询"perfetto 既有 MCP 接口是什么"→目录检索发现 `ui/src/plugins/com.google.PerfettoMcp/`（此前 §1.3 只登记了 query.ts 一行，未深挖）：官方 MCP=UI 进程内 ToolRegistry（zod schema+handler，签名对齐 MCP SDK）+ `/aichat` 内置 Gemini 聊天页，既有工具 query/show-perfetto-sql-view/show-timeline，无独立 server 进程。第一版 MCP 设计（外部 stdio server 驱动 headless 浏览器，曾落 MCP-ENTRY-DESIGN.md）违反"遵循既有架构"原则，作废删除、按用户指示文档统一回 PLAN；修正方案=增量注册 `render-timeline-image` 工具，handler 直调已就绪的 `trace.timelineImage` 原语，附 ToolResult 的 image content 扩展（MCP 标准 type:'image'）。副产品：上游可提交性论证恢复（加工具=官方演进方向内动作） |
 | 08-23 | T1.34 闭环 | **gh 权限通道**：Homebrew 需 sudo 不可用→直接下载 gh v2.98.0 官方二进制至 `~/.local/bin`；两次设备授权（login + refresh 补 `workflow` scope——无此 scope 推送 workflow 文件被 remote 拒绝）；`gh auth setup-git` 接管 git 认证。**根因**：`gh run view --log` 一拉即中——44 失败文件同一错误（vite 解析 `../gen/protos` 失败），即轻量 CI 缺 `ui/src/gen`（完整构建由 gn/ninja 生成并 symlink，`ui/src/protos/index.ts:22` 依赖它）；本地绿纯因 out/ 有产物。**修复**（commit f88057b37d）：`ui/ci/gen_stubs.mjs`——pbjs/pbts（protobufjs-cli 已是 devDep）生成 protos.js/.d.ts，diff 验证与 ninja 产物逐字节一致；四个 wasm 模块（traceconv/proto_utils/trace_processor/trace_processor_memory64）用 checked-in `ci/wasm_module.d.ts`（四者内容相同）+抛错 stub .js（单测从不实例化）；本地全绿（vitest 153/153、tsc 0 错）后推送。**结果**：run 32637330205 全绿，tsc 恢复硬门；另修 ci-logs 发布步骤 `ui/tsc.log`→`tsc.log` 路径 bug。**杂项**：pre-push 钩子 presubmit 检查（test/data 未同步等既有噪音）用 `--no-verify` 绕过——与本次改动无关；本地 `ui/src/gen` 由 symlink 变真实目录（内容一致，完整构建会自动恢复） |
 | 08-23 | T1.29 计划 | 官方测试流程对照：tsc✅/vitest 全量 2568✅/eslint⚠️未单独跑/**Playwright 31 spec 只跑过 1**（真死角）/像素基线 Linux-only（本地目录空，mac 跨机 diff 官方已知）。三步方案：a) format+lint 零警告；b) run-integrationtests 全量 + fail 归因规则（环境性豁免带证据/引入即修/存疑 stash 对照）；c) 归因矩阵归档。待用户批准执行 |
 | 08-23 | M2 (T2.1-2.3, T1.16) | postMessage renderTimelineImage：挂起 60s 等 trace、并发 1+队列 32（最老溢出显式拒绝）、PNG ArrayBuffer 回传、错误同 id 通道；T1.16 双层（API 等 !isLoadingTrace&&tracks 30s——半建树竞态实证：trackNames 曾误报 TRACK_MISSING）。demo postmessage-demo.mjs ~8s 端到端两连稳（含 150s 硬超时兜底——曾捕获进程退出挂死）；协议文档入 embedding-api-reference.md。产物 out/test-runs/postmessage-demo |
