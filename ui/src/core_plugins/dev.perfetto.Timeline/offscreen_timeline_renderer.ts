@@ -205,6 +205,15 @@ export async function renderOffscreenTimeline(
   if (widthPx !== undefined && !(widthPx >= 1)) {
     throw new Error('renderOffscreenTimeline: widthPx must be >= 1');
   }
+  // A zero-width or inverted span (start >= end) would produce a degenerate
+  // TimeScale (division by zero) and a blank-but-valid-looking canvas; reject
+  // it instead of silently succeeding.
+  if (!(timeSpan.duration > 0)) {
+    throw new Error(
+      `renderOffscreenTimeline: timeSpan must have start < end ` +
+        `(got start=${timeSpan.start.toTime()} end=${timeSpan.end.toTime()})`,
+    );
+  }
 
   // ------------------------------------------------------------------ layout
   const shellWidth = includeTrackShell ? TRACK_SHELL_WIDTH : 0;

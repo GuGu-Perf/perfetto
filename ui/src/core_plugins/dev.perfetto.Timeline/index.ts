@@ -136,6 +136,7 @@ async function renderTimelineImageAdapter(
   ];
   const pinned = opts.pinTracks ?? [];
   const pinnedSet = new Set(pinned);
+  const pinnedNotRendered = pinned.filter((uri) => !requested.includes(uri));
   const ordered = [
     ...pinned.filter((uri) => requested.includes(uri)),
     ...requested.filter((uri) => !pinnedSet.has(uri)),
@@ -152,6 +153,20 @@ async function renderTimelineImageAdapter(
         toTime(opts.timeSpan.end),
       )
     : trace.timeline.visibleWindow;
+  // A span entirely outside the trace bounds would render a blank image that
+  // still looks like a valid render; reject it up front. Partial overlap is
+  // fine: the tracks simply have no data before/after the trace.
+  const info = trace.traceInfo;
+  if (
+    info !== undefined &&
+    (timeSpan.end.lte(info.start) || timeSpan.start.gte(info.end))
+  ) {
+    throw new Error(
+      `renderTimelineImage: timeSpan ` +
+        `[${timeSpan.start.toTime()}, ${timeSpan.end.toTime()}] does not ` +
+        `overlap trace bounds [${info.start}, ${info.end}]`,
+    );
+  }
 
   const output = await renderOffscreenTimeline({
     trace,
@@ -168,6 +183,15 @@ async function renderTimelineImageAdapter(
   });
   if (unmatchedNames.length > 0 && !output.warnings.includes('TRACK_MISSING')) {
     output.warnings = [...output.warnings, 'TRACK_MISSING'];
+  }
+  // pinTracks entries outside the rendered set are skipped for layout but
+  // must be reported: a silent no-op hides caller mistakes (public API docs
+  // promise a TRACK_NOT_RENDERED warning for this case).
+  if (
+    pinnedNotRendered.length > 0 &&
+    !output.warnings.includes('TRACK_NOT_RENDERED')
+  ) {
+    output.warnings = [...output.warnings, 'TRACK_NOT_RENDERED'];
   }
   return output;
 }

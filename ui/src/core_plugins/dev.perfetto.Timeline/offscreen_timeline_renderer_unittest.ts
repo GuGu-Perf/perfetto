@@ -65,6 +65,30 @@ test('widthPx and aspectRatio are mutually exclusive', async () => {
   ).rejects.toThrow('mutually exclusive');
 });
 
+test('zero-width timeSpan (start == end) is rejected', async () => {
+  const trace = createFakeTraceImpl();
+  await expect(
+    renderOffscreenTimeline({
+      trace,
+      trackUris: [],
+      timeSpan: span(1_000n, 1_000n),
+      widthPx: 100,
+    }),
+  ).rejects.toThrow('timeSpan must have start < end');
+});
+
+test('inverted timeSpan (start > end) is rejected', async () => {
+  const trace = createFakeTraceImpl();
+  await expect(
+    renderOffscreenTimeline({
+      trace,
+      trackUris: [],
+      timeSpan: span(2_000n, 1_000n),
+      widthPx: 100,
+    }),
+  ).rejects.toThrow('timeSpan must have start < end');
+});
+
 test('aspectRatio <= 0 is rejected', async () => {
   const trace = createFakeTraceImpl();
   await expect(

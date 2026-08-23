@@ -712,6 +712,7 @@ trace.pftrace
 | v9.17 | 08-23 | T1.23 护栏协商（dpr 自动降级） |
 | v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
 | v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
+| v9.36 | 08-23 | **T3.7 收口：全场景回归 + rebaseline 流程**。源码补齐参数边界组缺口（§6.3 行 1）——渲染器拒绝零宽/反转 timeSpan（原为 NaN TimeScale 静默空白图）、入口层拒绝全越界 span、pinTracks 未渲染 uri 由静默过滤改为 TRACK_NOT_RENDERED warning（兑现公共 API 文档承诺）；新增并发双请求字节一致用例（§6.3 行 3 挂账项）。验证：vitest 2570 全绿、tsc 零错、eslint 清零、Playwright timeline_image 17/17（13 旧 + 4 新）全绿。rebaseline 三步判定流程（归因→定性→独立 commit 留痕）写入 D.4，实现/基线解耦原则固化。八组矩阵至此全部 ✅（含此前 v9.28 盘点的四项"待补"） |
 | v9.34 | 08-23 | **ADR-16：项目边界定案（用户明示）**——只开发 perfetto 源码、实现截图 API，源码无关功能全放弃。调用方基建全线关闭：T3.5 渲染服务 ❌、T3.6 MCP 适配器 ❌（原 T3.6 全场景回归重编号 T3.7）；§8 部署运维降级为设计参考。ADR-14/15 的三连修正至此收敛于最简边界：**交付物=源码内三层能力（L1 离屏渲染器 / L2 公共 API / L3 postMessage 入口）+ 测试与文档**，其余皆非本项目。剩余源码侧任务：T3.3 trackNamePatterns、T3.4 性能验收+CI 看护、T3.7 全场景回归、M1a PR 0 重构前置 |
 | v9.33 | 08-23 | **ADR-15：MCP 二次定性（用户价值链推演定案）**。用户点破真价值=第三方 Agent 后台批量分析出图进报告，非 UI 内 1:1 聊天（人看实时时间线，既有 show-timeline 跳转即可）；叠加上一轮 review 核验（gemini_client.ts 的 functionResponse 只回传文本，模型看不到图）→ 插件内 render-timeline-image 两头价值皆弱，T3.2 ❌。MCP 重新定性为**调用方适配器**（T3.6，tools/mcp-server.mjs）：stdio server + 常驻 headless Chromium + postMessage 翻译，perfetto 零改动、不进上游——"无中生有"禁令只约束 perfetto 仓库内，调用方走官方 embedding 协议自建消费者与 demo/渲染服务同类。v9.32 的官方 MCP 架构核验结论保留并成为本决策论据 |
 | v9.32 | 08-23 | **L3 入口收敛（ADR-14）+ MCP 方向修正**：用户两轮质询（"Command 有必要吗""既有架构是什么"）触发——Command 面板砍掉（❌，防呆/叙事性论证见 ADR-14）；MCP 方案推翻"外部 stdio server"初稿（曾写 MCP-ENTRY-DESIGN.md，已删并按用户要求文档统一回 PLAN），源码核验官方 `com.google.PerfettoMcp` 架构（UI 进程内 ToolRegistry + zod 工具 + 内置 Gemini 聊天页消费，无独立 server 进程），修正为增量注册 `render-timeline-image` 工具（新 timeline_tools.ts 照 uitools.ts 风格 + ToolResult 扩 image content + 可选 list-tracks）；上游可提交性恢复（给既有插件加工具=顺应官方演进）。设计更新至 §3.5(b)(c)，任务表 T3.1 ❌ / T3.2 落地路径刷新 |
@@ -830,7 +831,7 @@ trace.pftrace
 | T3.3 | trackNamePatterns | 按名选 track；SF [NULL] 线程名边界用例过 | M1 | ⬜ | commit | §6.1 A1 参数集 |
 | T3.4 | 性能验收 + CI 看护固化 | §6.4 基准全过；软阈值（×2 告警/×3 阻断）入库 | M1 | ⬜ | CI 配置 | |
 | T3.5 | ~~渲染服务样板（长驻 headless + §8.2 流水线）~~ | ~~5 fixture 批量出图成功~~ | T2.3 | ❌ | — | v9.34/ADR-16：同 T3.6，调用方基建出界；§8 部署运维章降级为设计参考不再执行 |
-| T3.7 | 全场景回归 + rebaseline 判定流程落地 | 八组用例全绿；rebaseline 规则写入贡献文档 | T3.4 | ⬜ | — | §6.4 判定规则；编号原 T3.6，让位 MCP 任务后重排（v9.34） |
+| T3.7 | 全场景回归 + rebaseline 判定流程落地 | 八组用例全绿；rebaseline 规则写入贡献文档 | T3.4 | ✅ | commit（本分支） | v9.36 收口：参数边界补齐（零宽/反转 span 拒绝、全越界拒绝、pin 未渲染 → TRACK_NOT_RENDERED——原为静默过滤违例）+ 并发双请求字节一致用例；vitest 2570 绿 + Playwright timeline_image 17/17 绿；rebaseline 三步判定流程入 D.4 |
 
 **性能优化杠杆的任务化原则**：§5.4 杠杆清单按 top-down 闭环**条件触发**（先测基线、归因后再立项），不预设为任务；被选中的杠杆在 D.2.4 追加编号任务（T3.7+），未选中的保持清单态。by-design 杠杆无需立项（随 PR 1 自然获得）。
 
@@ -853,6 +854,12 @@ trace.pftrace
 | 正式 spec 自动产物（API 渲染 PNG） | `out/ui/timeline_image_artifacts/<时间戳>-<用例>.png`（Playwright 仅物化失败用例附件，spec 自行落盘，v9.5 增补） | 时间戳 + 用例名，逐次累积 | ❌ |
 
 运行目录结构件：`run.json`（用例 ID/trace fixture/git rev/GL 后端/dpr 等环境）、`assertions.json`（逐条断言结果，**失败必须含原因字段**，对齐 D.3 失败留痕）、`metadata.json`（`TimelineImageResult` 的 warnings/perf/trackBoxes 原样落盘，供 §6.4 趋势与 §8.5 看护消费）、`querylog.json`（§6.5：该次运行触发的全部 SQL 与耗时，来自 `engine.queryLog`）、`metatrace.pb`（可选，§6.5：问题复现时导出，标准 proto trace 可回载 UI）、`*.png`。保留策略：最近 50 次或 30 天、空间上限 2GB，超出自动清理最旧。**执行现状（v9.5 诚实登记）**：manual run 目录目前仅 run.json（+部分 metadata.json），assertions/querylog/png 由 T1.13 脚本化补齐；保留策略未实现，随 T1.13 交付。渲染服务的批量产物不进本仓库（走临时目录/对象存储，§8.3）。
+
+**Rebaseline 判定流程（v9.36，T3.7 交付）**——像素基线 mismatch 时的三步处置，禁止"跑 `--update-snapshots` 让它绿"：
+
+1. **归因**：diff 图与 actual/expected 双图人工比对，先查运行环境矩阵（GL 后端/字体/dpr/机器）——mac 本地对 Linux 基线的像素 diff 是已知环境性差异（T1.29 官方结论），此类 mismatch **不触发 rebaseline**，以 CI Linux runner 结果为准；
+2. **定性**：环境归因排除后仍 diff → 二分定位引入 commit；判定语义：a) 预期改进（有意的渲染行为变化，如样式修复）→ 允许 rebaseline；b) 意外回归 → 修复代码而非基线；c) 不确定 → 挂起并保留双图证据；
+3. **执行与留痕**：rebaseline 仅经 `--update-snapshots` 原地覆盖（固定路径），**必须**独立 commit（消息前缀 `test: rebaseline`），正文写明：触发用例、diff 面积、定性结论（a/b/c）、关联任务号。golden 基线（baselines/）同理，另需更新 pngHash 记录。**实现 commit 不得顺手改基线**（期望与实现解耦原则，v9.13）。
 
 ### D.5 执行日志（Execution Log）
 

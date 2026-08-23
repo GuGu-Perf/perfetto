@@ -530,4 +530,91 @@ test.describe.serial('timeline image rendering', () => {
     // The explicit uri still renders.
     expect(result.trackCount).toBe(1);
   });
+
+  test('bounds: zero-width timeSpan rejects', async () => {
+    const err = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      try {
+        await trace.timelineImage.renderTimelineImage({
+          trackUris: ['/sched_cpu0'],
+          timeSpan: {start: BigInt(win.start), end: BigInt(win.start)},
+          widthPx: 800,
+        });
+        return null;
+      } catch (e) {
+        return String(e);
+      }
+    }, A2_WINDOW);
+    expect(err).toContain('timeSpan must have start < end');
+  });
+
+  test('bounds: timeSpan entirely outside the trace rejects', async () => {
+    const err = await helper.page.evaluate(async () => {
+      const trace = window.ctx as unknown as TestTrace;
+      try {
+        await trace.timelineImage.renderTimelineImage({
+          trackUris: ['/sched_cpu0'],
+          timeSpan: {start: 1n, end: 2n},
+          widthPx: 800,
+        });
+        return null;
+      } catch (e) {
+        return String(e);
+      }
+    });
+    expect(err).toContain('does not overlap trace bounds');
+  });
+
+  test('bounds: pinTracks with a non-rendered uri warns TRACK_NOT_RENDERED', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      const r = await trace.timelineImage.renderTimelineImage({
+        trackUris: ['/sched_cpu0'],
+        pinTracks: ['/sched_cpu0', '/does/not/exist'],
+        timeSpan,
+        widthPx: 800,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 20_000,
+      });
+      return {
+        warnings: [...r.warnings],
+        trackUris: r.trackBoxes.map((t) => t.uri),
+      };
+    }, A2_WINDOW);
+    // The renderable pin still applies; the unknown pin is reported, not
+    // silently skipped.
+    expect(result.warnings).toContain('TRACK_NOT_RENDERED');
+    expect(result.warnings).not.toContain('TRACK_MISSING');
+    expect(result.trackUris).toEqual(['/sched_cpu0']);
+  });
+
+  test('concurrency: two overlapping renders both succeed, byte-identical', async () => {
+    const result = await helper.page.evaluate(async (win) => {
+      const trace = window.ctx as unknown as TestTrace;
+      const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
+      const opts = {
+        trackUris: ['/sched_cpu0', '/sched_cpu1'],
+        timeSpan,
+        widthPx: 800,
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 20_000,
+      };
+      const [a, b] = await Promise.all([
+        trace.timelineImage.renderTimelineImage(opts),
+        trace.timelineImage.renderTimelineImage(opts),
+      ]);
+      const toHex = async (blob: Blob) =>
+        Array.from(new Uint8Array(await blob.arrayBuffer()), (x) =>
+          x.toString(16).padStart(2, '0'),
+        ).join('');
+      return {
+        aHex: await toHex(a.blob),
+        bHex: await toHex(b.blob),
+        warnings: [...a.warnings, ...b.warnings],
+      };
+    }, A2_WINDOW);
+    expect(result.warnings).toEqual([]);
+    expect(result.bHex).toBe(result.aHex);
+  });
 });
