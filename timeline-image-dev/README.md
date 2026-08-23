@@ -4,7 +4,7 @@
 |---|---|
 | 设计与执行总文档（API 设计/难点/性能/测试/任务表/执行日志） | [PLAN.md](PLAN.md) |
 | 冒烟结果表（最近一轮 12/12 通过） | [tools/SMOKE.md](tools/SMOKE.md) |
-| 完整测试报告（参数/期望/实际/截图路径） | [tools/TEST-REPORT.md](tools/TEST-REPORT.md) |
+| 测试报告（金字塔现状+关键数据+代表截图） | [tools/TEST-REPORT.md](tools/TEST-REPORT.md) |
 | 黄金场景 runner | [tools/run-golden.mjs](tools/run-golden.mjs) |
 | 冻结基线（序列+像素双硬断言） | [tools/baselines/](tools/baselines/) |
 | 冒烟测试脚本 | [tools/smoke.mjs](tools/smoke.mjs) |

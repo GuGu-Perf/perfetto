@@ -235,7 +235,8 @@ renderTimelineImage(opts?: Partial<TimelineImageOptions>): Promise<TimelineImage
 
 interface TimelineImageOptions {
   // —— 数据选择 ——
-  trackUris?: readonly string[];          // 自上而下顺序；缺省=workspace 默认可见行（组标题行含，与 UI 同序）
+  trackUris?: readonly string[];          // 自上而下顺序；缺省=workspace 默认可见行（组标题行含，与 UI 同序），
+                                          // 高度上限 2160px 超出截断 + TRUNCATED warning（显式集合不受限）
   trackNames?: readonly {name: string; tid?: number; pid?: number}[];  // 人类语义定位，解析后并入 trackUris
   pinTracks?: readonly string[];          // 置顶（须同时在渲染集合中）
   timeSpan?: {start: time|string; end: time|string};  // ns；字符串兼容 postMessage/JSON
@@ -476,7 +477,7 @@ interface TimelineImageBudget {
 | 跨 fixture 冒烟 | 5 份 fixture 全部"加载 → render → 非纯色 + metadata 完整" | 覆盖 protobuf/设备/场景差异 |
 | GL 生命周期 | 连续 20 张（含分片）无 context lost；`loseContext()` 重建后可用 | §3.3.4 单例规则验证 |
 
-**覆盖状态映射（v9.20）**——八组矩阵 ↔ 已落地测试/场景：
+**覆盖状态映射（v9.28）**——八组矩阵 ↔ 已落地测试/场景：
 
 | 组 | 现状 |
 |---|---|
@@ -853,3 +854,4 @@ trace.pftrace
 | 08-23 | 制度演进 | 逐轮质询驱动：17 类组件盘点+弹窗免疫实证（注入 modal 输出逐字节不变）→allowlist 两开关决策（preset 砍除）→黄金场景注册表+冻结基线（期望与实现解耦，实现 commit 不得顺手改期望）→验证脚本强制阶段计时+硬超时+daemon 内嵌 |
 | 08-23 | G-E1 用户用例 | 用户亲写用例（slice[95635..115701]/RenderThread 4543/4:3）：timecode 与 trace_processor 交叉验证自洽（domain 原点 3424607565230）；驱动 T1.27/T1.28 落地后切原生参数，基线逐字节一致 |
 | 08-23 | T1.15 扫描 | 双层（默认视图 6 fixture noWarmup=0 零空白；jank 1999 叶子分批零空白，低覆盖 287 条=稀疏数据源正常）。途中修扫描脚本自身 h/height 字段 bug——期望独立于实现的又一实证 |
+| 08-23 | T1.32/33 差分关停→owner 金字塔 | 差分 5 轮实证跨管线 oracle 不适定（合成色差/渐进加载/稀疏相关），关闭；战果：depth 缩进修复（trackIndent 参数，交互零变化）+ G2 断言并入 spec；测试金字塔定稿（单元/契约/G1+G2 结构/基线字节 hash/人工冒烟），10/10 集成；全资产 review 同日执行（死资产清理/代表图刷新/文档同步） |
