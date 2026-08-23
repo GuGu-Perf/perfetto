@@ -37,3 +37,10 @@ jobs:
           ./node_modules/.bin/tsc --noEmit 2>&1 | tee tsc.log
       - name: Unit tests (full suite)
         run: ./node_modules/.bin/vitest run --config vitest.config.mjs
+      - name: Upload tsc log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsc-log
+          path: ui/tsc.log
+          if-no-files-found: warn
