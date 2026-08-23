@@ -695,6 +695,7 @@ trace.pftrace
 | v9.15 | 2026-08-23 | **尺寸/定位 API 形态定稿并落地**（owner 设计经用户确认，T1.27+T1.28 ✅）：三层渐进披露——零配置（宽 1920/dpr 2/scale 0.5）/形状（widthPx 或 aspectRatio **互斥二选一**，高度恒由 track 集合导出，ratio 于布局后求解无探测渲染）/清晰度（dpr 独立维度）；`trackNames: [{name, tid?, pid?}]`（标题精确/前缀匹配、headless 组优先、uri 去重、未匹配 TRACK_MISSING）；warning 链路 offscreen→manager→公共 result 打通；G-E1 切换原生参数，基线逐字节一致（交叉验证）；9/9 集成 + 2566 单测 + 三基线 MATCH |
 | v9.16 | 2026-08-23 | **T1.15 覆盖率扫描闭环**：双层扫描工具入库（scan-tracks/scan-tracks-deep）——6 fixture 默认视图零空白 + noWarmup=0；jank fixture 1999 叶子全量分批渲染**零空白**，低覆盖 287 条抽查均为稀疏数据源正常表现；"某类 track 离屏空白"类别性风险在本 fixture 宇宙内正式关闭（新插件类型接入需重跑扫描，工具已固化） |
 | v9.17 | 2026-08-23 | **T1.23 护栏协商落地**：negotiateDpr 纯函数（请求 dpr 溢出画布上限→自动降 1x，1x 仍溢出才拒绝），result.devicePixelRatio 公共字段如实报告有效值——零配置调用在重 trace 工作区（默认收集 6000+px 高）不再开箱抛错；2568 单测 + 9 集成 + 三基线 MATCH |
+| v9.18 | 2026-08-23 | **M2 里程碑达成（PR 2 核心）**：postMessage renderTimelineImage 入口（T2.1-T2.3 ✅）+ T1.16 双层闭环（API 等 !isLoadingTrace&&tracks、调度层等 trace）——外部程序经宿主页 iframe **一条消息链取回 PNG**（demo ~8s 端到端，两连跑稳定）；途中实证并修复半建树竞态（trackNames 曾误报 TRACK_MISSING）；用户质询"太慢"→制度再升级：验证脚本强制阶段计时+硬超时+daemon 内嵌管理（demo 曾因进程退出挂死被 150s 兜底捕获） |
 | v9.4 | 2026-08-23 | 新增 §5.4 性能优化方法论与杠杆清单（top-down 闭环：测全链路→阶段归因→攻大头→单变量→复测；16 项杠杆按阶段分组，含渲染服务真机 GPU/ANGLE 杠杆及像素一致性权衡）；§1.4/§8.5 交叉引用 |
 
 ---
@@ -764,7 +765,7 @@ trace.pftrace
 | T1.13 | 产物规范补齐：harvester 脚本（manual run 六件套自动生成）+ 保留策略清理 + latest 软链 | D.4 承诺全部兑现：六件套齐、清理生效 | T1.9 | ⬜ | 脚本 | v9.5 补登记（此前执行缺口） |
 | T1.14 | 确定性残余抖动根因（真机 GPU headless 间歇 diff；嫌疑 MSAA，antialias=false 实验证伪简单路径并致非纯色回归；替代假设：残余逐出窗口/纹理缓存） | 复现率量化（≥100 次采样）+ 根因定位；期间 spec 保持 retries=2（已声明的技术债，非静默掩盖） | T1.10 | ⛔ | 调查记录 | v9.5 正式立账；与 T1.10 合并跟进 |
 | T1.15 | track 渲染器 whenDataReady 覆盖率清单（系统性债务：所有自带 BufferedBounds/AsyncMemo 状态的 track 均需 queryBounds+whenDataReady 才能离屏正确出图；T1.4 只改了 slice/counter 两基类） | 盘点全部注册 track 类型 → 分类（已支持/待改造/离屏不可用）；每类至少一个 fixture 用例进 C1 矩阵 | T1.4 | ✅ | 清单文档 + 用例 | v9.6 立账 → **v9.16 扫描闭环**：tools/timeline-image/scan-tracks*.mjs 双层扫描——①默认视图：6 fixture 全部 track 特征盘点（noWarmup=0：树内全部非组叶子均具备 whenDataReady——slice/counter 两基类改造的继承覆盖面 + CpuFreqTrack 补齐后恰好覆盖 fixture 宇宙全部类型）+ 默认渲染逐 band 零空白；②深度：jank fixture 全部 1999 叶子分批渲染（500/批），**零空白**，低覆盖 287 条抽查全为稀疏数据源（battery_stats/clock snapshots/doze/wakelock 类）正常表现。产物 out/test-runs/2026-08-23-04-23-23-t1.15-scan。**边界**：扫描只覆盖本 fixture 宇宙的 track 类型；新插件类型接入时需重跑扫描（工具已入库） |
-| T1.16 | workspace 时序竞争防护（traceInfo 就绪 ≠ defaultWorkspace 树建完；过早调用 renderTimelineImage 会报 no renderable tracks） | renderTimelineImage 在 workspace 空时等待（有限预算）或返回 WORKSPACE_NOT_READY warning，而非误报 missing | T1.7 | ⬜ | 修复 + 用例 | v9.6 立账。实证：偶发 missing 全部所请求 URI（Playwright waitForFunction 等 /thread_7303 出现后稳定）；测试脚本侧已规避，API 侧未防护 |
+| T1.16 | workspace 时序竞争防护（traceInfo 就绪 ≠ defaultWorkspace 树建完；过早调用 renderTimelineImage 会报 no renderable tracks） | renderTimelineImage 在 workspace 空时等待（有限预算）或返回 WORKSPACE_NOT_READY warning，而非误报 missing | T1.7 | ✅ | 修复 + 用例 | v9.6 立账 → v9.18 闭环（双层）：API 侧等待 `!isLoadingTrace && workspace 有 track`（30s 预算，超时明确报错——比"有任意 track"更强，堵住半建树竞态：demo 实证 trackNames 曾在半建树上误报 TRACK_MISSING）；postMessage 侧等 trace 出现（60s）。M2 demo 两连跑零 flake |
 | T1.17 | native trace_processor 测试默认化（`trace_processor_shell -D` daemon + UI 自动协商；注意 daemon 有 preloaded trace 时 UI 会弹确认框，测试需空载 daemon） | 测试脚本默认 native：smartperfetto 14.86MB 加载 4.3s→0.9s；example 58MB 2.6s(WASM 3.3s)；脚本记录引擎证据（console "Opening trace using native accelerator"，注意勿误匹配启动期 ERR_CONNECTION_REFUSED 警告） | — | ✅ | daemon 启停 + bench 记录 | v9.7；UI 侧无需改动（USE_HTTP_RPC_IF_AVAILABLE 自动协商）；后续所有 manual run 默认带 native |
 | T1.18 | 组件宇宙盘点与覆盖物免疫验证（用户质询"是否最多 9 个组件、弹窗是否排除"触发） | 完整矩阵：9 静态布局 + 8 类动态组件（modal/toast/tooltip/hint/spinner/popup/选中态/搜索高亮），每类标注排除机制并有证据 | — | ✅ | 组件矩阵 + 免疫实验 | v9.8。**弹窗免疫已实证**（out/test-runs/20260823-overlay-immunity：注入 modal 后渲染与干净首拍逐字节相同 b985fc96/62267B）；DOM 层组件物理不可入图（离屏输出自合成 GL+2D canvas）；canvas 内 session 覆盖物 includeSessionOverlays:false 排除；perfStatsEnabled:false 排除统计小字。边界残留：checkerboard 加载占位在 per-track 超时软退出时可能入图（timedOutTracks warning 兜底，未单独实证）；track 组标题行（DOM sticky）不入图，名称列实现时以缩进层级补偿 |
 | T1.19 | webfont 时序：UI 字体是 woff2 + font-display:swap，离屏首渲染可能用 fallback 字形（破坏确定性与视觉一致） | renderOffscreenTimeline 开头 await document.fonts.ready | — | ✅ | commit | v9.10 修复（用户"还有哪些漏洞"质询触发）。测试环境字体恒就绪难以构造失败用例，以代码审查+原理为保证 |
@@ -784,9 +785,9 @@ trace.pftrace
 
 | ID | 任务 | 验收标准 | 依赖 | 状态 | 产出物 | 备注 |
 |---|---|---|---|---|---|---|
-| T2.1 | 消息分支 + trace 未就绪挂起 | §6.3 协议组全绿；PONG 后到达不丢 | T1.7 | ⬜ | commit | §3.5(a) |
-| T2.2 | 协议文档（embedding-api-reference.md 增补） | 消息定义/前置条件/静默失败警示齐备 | T2.1 | ⬜ | docs | |
-| T2.3 | 外部脚本验证（Node/Python 一条消息取回 PNG） | 本地演示通过 | T2.1 | ⬜ | 示例脚本 | M2 演示物 |
+| T2.1 | 消息分支 + trace 未就绪挂起 | §6.3 协议组全绿；PONG 后到达不丢 | T1.7 | ✅ | commit | v9.18：action=renderTimelineImage（id 关联、ArrayBuffer PNG、结构化 meta、错误同通道回传）；挂起 60s 等 trace；并发 1 + 队列 cap 32（最老溢出请求显式拒绝，不静默丢弃）；响应回 event.origin（COOP 'null' 时 '*'，与 PONG 同权衡）
+| T2.2 | 协议文档（embedding-api-reference.md 增补） | 消息定义/前置条件/静默失败警示齐备 | T2.1 | ✅ | docs | v9.18：协议节 + 挂起/队列/确定性语义 + 示例代码
+| T2.3 | 外部脚本验证（Node/Python 一条消息取回 PNG） | 本地演示通过 | T2.1 | ✅ | 示例脚本 | v9.18：postmessage-demo.mjs（宿主页 iframe 嵌入→PING/PONG→post trace+请求背靠背→PNG 回传显示/落盘）；阶段计时 + 150s 硬超时 + 内嵌空 daemon 管理（T1.22 规则）；端到端 ~8s，两连跑稳定 |
 
 #### D.2.4 M3 = PR 3：入口完备性与性能收尾
 
