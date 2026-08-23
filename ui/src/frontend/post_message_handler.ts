@@ -255,8 +255,21 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     return;
   }
 
+  // renderTimelineImage and listTracks return trace-derived data (a PNG of
+  // the loaded trace, the workspace's track/process/thread names) to the
+  // sender, so unlike view-only messages they require a trusted origin -
+  // the same gate as opening a trace (localhost is always trusted; other
+  // origins are granted via the trace-upload consent's "always trust").
+  const dataExportTrusted = isTrustedOrigin(messageEvent.origin);
+
   if (isPostedRenderTimelineImage(messageEvent.data)) {
     const windowSource = messageEvent.source as Window;
+    if (!dataExportTrusted) {
+      console.warn(
+        `renderTimelineImage ignored: untrusted origin ${messageEvent.origin}`,
+      );
+      return;
+    }
     // Reply to the origin when known; COOP-isolated embedders see 'null'
     // and require '*' (same trade-off as PONG, plus PNG payload).
     const targetOrigin =
@@ -270,6 +283,12 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   let postedScrollToRange: PostedScrollToRange;
   if (isPostedListTracks(messageEvent.data)) {
     const windowSource = messageEvent.source as Window;
+    if (!dataExportTrusted) {
+      console.warn(
+        `listTracks ignored: untrusted origin ${messageEvent.origin}`,
+      );
+      return;
+    }
     const targetOrigin =
       messageEvent.origin === 'null' ? '*' : messageEvent.origin;
     runListTracks(messageEvent.data.perfetto, (payload) => {

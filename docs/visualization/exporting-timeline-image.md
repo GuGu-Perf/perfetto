@@ -23,6 +23,10 @@ assume that setup.
 
 - Serve your host page over `http(s)` and complete the PING/PONG handshake
   described in [Embedding the UI](/docs/visualization/embedding-the-ui.md).
+- Host from `localhost`/`127.0.0.1` (always trusted), or from an origin the
+  user marked "always trust" in the trace-upload consent: image export and
+  track listing return trace data to the sender and are ignored from other
+  origins.
 - Load a trace first (or in the same session — see step 2).
 - Know which tracks and time span you want. The most useful images name
   their subjects: "the RenderThread and sf tracks during the jank at

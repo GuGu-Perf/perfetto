@@ -722,4 +722,38 @@ test.describe.serial('timeline image rendering', () => {
       tracks.some((t) => t.name === 'CPU Frequency' && t.uri === null && t.isGroup),
     ).toBe(true);
   });
+
+  test('listTracks from an untrusted origin is ignored', async () => {
+    const result = await helper.page.evaluate(
+      () =>
+        new Promise<{gotResult: boolean; consoleWarned: boolean}>((resolve) => {
+          let gotResult = false;
+          let consoleWarned = false;
+          const onConsole = () => {
+            consoleWarned = true;
+          };
+          window.addEventListener('console', onConsole);
+          const onMsg = (ev: MessageEvent) => {
+            const d = (ev.data as {perfetto?: {action?: string}}).perfetto;
+            if (d?.action === 'listTracksResult') gotResult = true;
+          };
+          window.addEventListener('message', onMsg);
+          // Forge a message as if from an untrusted embedder: the handler
+          // must drop it before any data leaves the page.
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: {perfetto: {action: 'listTracks', id: 'evil-1'}},
+              origin: 'https://evil.example',
+              source: window,
+            }),
+          );
+          setTimeout(() => {
+            window.removeEventListener('message', onMsg);
+            window.removeEventListener('console', onConsole);
+            resolve({gotResult, consoleWarned});
+          }, 1500);
+        }),
+    );
+    expect(result.gotResult).toBe(false);
+  });
 });

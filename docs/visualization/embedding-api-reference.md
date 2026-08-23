@@ -147,6 +147,11 @@ Semantics:
 - **Determinism**: the output contains only timeline content (track shell
   names, time axis, track data); no DOM chrome, interaction state or
   overlays ever appear in the image.
+- **Trusted origins only**: `renderTimelineImage` and `listTracks` return
+  trace-derived data to the sender, so — like opening a trace — they are
+  only honored from trusted origins (localhost always; other origins via
+  the trace-upload consent's "always trust"). Untrusted senders are
+  ignored with a console warning.
 - The result message is posted to `event.origin` when known (`'*'` under
   cross-origin isolation).
 
