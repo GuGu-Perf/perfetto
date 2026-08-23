@@ -1,7 +1,7 @@
 # 冒烟测试结果（一轮，最终版本 v9.22）
 
 > 截图：`timeline-image-dev/results/REPORT-ASSETS/smoke/<fixture>-<组名>.png`（12 张全部可打开）
-> 命令：`node tools/timeline-image/smoke.mjs`（数据 smoke.json 同目录）
+> 命令：[smoke.mjs](smoke.mjs)（数据 [smoke.json](../results/REPORT-ASSETS/smoke/smoke.json)）
 
 ## S1 默认参数 `renderTimelineImage({widthPx: 1200, devicePixelRatio: 1})`
 含义：不挑 track、不挑窗口 = 浏览器默认全部可见 track。期望：完整出图、零 warnings、有内容。

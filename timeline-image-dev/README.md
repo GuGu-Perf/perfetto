@@ -1,26 +1,34 @@
 # Timeline Image — 本次功能开发的全部非代码产物（唯一入口）
 
-| 位置 | 内容 |
+| 内容 | 链接 |
 |---|---|
-| `PLAN.md` | 设计与执行总文档（API 设计/难点/性能/测试/任务表/执行日志） |
-| `tools/run-golden.mjs` + `baselines/` | 黄金场景 runner 与冻结基线（序列+像素双硬断言） |
-| `tools/smoke.mjs` | 冒烟测试（6 fixture × 默认/调参） |
-| `tools/scan-tracks.mjs` / `scan-tracks-deep.mjs` | 全 track 覆盖率扫描 |
-| `tools/postmessage-demo.mjs` | 外部程序取图 demo |
-| `tools/prune-artifacts.mjs` | 结果目录保留策略（50/30天/2GB） |
-| `tools/SMOKE.md` | 冒烟结果表（最近一轮 12/12） |
-| `tools/TEST-REPORT.md` | 完整测试报告（参数/期望/实际/截图路径） |
-| `results/` | 全部测试结果（git 忽略；REPORT-ASSETS=代表截图，smoke/=冒烟 12 张，integration/=集成测试产物，LATEST-*=最新软链，其余=各时间戳 run） |
+| 设计与执行总文档（API 设计/难点/性能/测试/任务表/执行日志） | [PLAN.md](PLAN.md) |
+| 冒烟结果表（最近一轮 12/12 通过） | [tools/SMOKE.md](tools/SMOKE.md) |
+| 完整测试报告（参数/期望/实际/截图路径） | [tools/TEST-REPORT.md](tools/TEST-REPORT.md) |
+| 黄金场景 runner | [tools/run-golden.mjs](tools/run-golden.mjs) |
+| 冻结基线（序列+像素双硬断言） | [tools/baselines/](tools/baselines/) |
+| 冒烟测试脚本 | [tools/smoke.mjs](tools/smoke.mjs) |
+| 全 track 覆盖率扫描 | [tools/scan-tracks.mjs](tools/scan-tracks.mjs) / [scan-tracks-deep.mjs](tools/scan-tracks-deep.mjs) |
+| 外部程序取图 demo | [tools/postmessage-demo.mjs](tools/postmessage-demo.mjs) |
+| 结果目录保留策略清理 | [tools/prune-artifacts.mjs](tools/prune-artifacts.mjs) |
+| 代表性截图（G-STD/G-E1/postMessage/确定性/冒烟 12 张） | [results/REPORT-ASSETS/](results/REPORT-ASSETS/) |
+| 冒烟截图目录 | [results/REPORT-ASSETS/smoke/](results/REPORT-ASSETS/smoke/) |
+| 集成测试产物 | [results/integration/](results/integration/) |
+| 全部历史 run 目录 | [results/](results/) |
 
-> 代码在源码树：`ui/src/public/timeline_image.ts`、`ui/src/core/timeline_image_manager.ts`、
-> `ui/src/core_plugins/dev.perfetto.Timeline/`（离屏渲染）、`ui/src/frontend/post_message_handler.ts`。
-> 协议文档增补在 `docs/visualization/embedding-api-reference.md`（上游文档树的正确位置）。
-> CI 在 `.github/workflows/timeline-image-fork-ci.yml`（GitHub 要求的位置）。
+**代码位置**（源码树，随上游结构）：
+- 公共 API：[ui/src/public/timeline_image.ts](../ui/src/public/timeline_image.ts)
+- 管理器：[ui/src/core/timeline_image_manager.ts](../ui/src/core/timeline_image_manager.ts)
+- 离屏渲染器：[ui/src/core_plugins/dev.perfetto.Timeline/offscreen_timeline_renderer.ts](../ui/src/core_plugins/dev.perfetto.Timeline/offscreen_timeline_renderer.ts)
+- postMessage 入口：[ui/src/frontend/post_message_handler.ts](../ui/src/frontend/post_message_handler.ts)
+- 集成测试：[ui/src/test/timeline_image.test.ts](../ui/src/test/timeline_image.test.ts)
+- 协议文档（上游文档树位置）：[docs/visualization/embedding-api-reference.md](../docs/visualization/embedding-api-reference.md)
+- CI workflow（GitHub 要求位置）：[.github/workflows/timeline-image-fork-ci.yml](../.github/workflows/timeline-image-fork-ci.yml)
 
 日常使用：
-```
-node timeline-image-dev/tools/run-golden.mjs G-STD          # 黄金场景+基线验证
-node timeline-image-dev/tools/smoke.mjs                      # 冒烟一轮
-node timeline-image-dev/tools/prune-artifacts.mjs            # 清理旧结果
-open timeline-image-dev/results/REPORT-ASSETS/               # 看截图
+```sh
+node timeline-image-dev/tools/run-golden.mjs G-STD   # 黄金场景+基线验证
+node timeline-image-dev/tools/smoke.mjs              # 冒烟一轮
+node timeline-image-dev/tools/prune-artifacts.mjs    # 清理旧结果
+open timeline-image-dev/results/REPORT-ASSETS/       # 看截图
 ```

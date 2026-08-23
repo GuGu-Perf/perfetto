@@ -17,7 +17,7 @@ renderTimelineImage({
 ```
 - 期望：前两条为 RenderThread（state 18px + slice 132px）；各 band 颜色数 >10（非纯色）
 - 实际：✅ 通过；截图 `timeline-image-dev/results/REPORT-ASSETS/integration-a2-pinned.png`
-- 完整产物目录：`out/ui/timeline_image_artifacts/`（每跑一次一个时间戳 PNG）
+- 完整产物目录：[results/integration/](../results/integration/)（每跑一次一个时间戳 PNG）
 
 ### 字节确定性
 ```ts
@@ -80,7 +80,7 @@ renderTimelineImage({
 ```
 - 实际：1800×392、10 track、warnings=[]、~209ms API 耗时、BASELINE MATCH ✓
 - **截图**：`timeline-image-dev/results/REPORT-ASSETS/G-STD-golden.png`（API 输出）｜`G-STD-ui-reference.png`（浏览器同屏参照）
-- 基线：`tools/timeline-image/baselines/G-STD.json`
+- 基线：[baselines/G-STD.json](baselines/G-STD.json)
 
 ### G-DEFAULT — 零参数语义
 ```ts
