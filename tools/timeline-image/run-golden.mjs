@@ -146,7 +146,7 @@ async function main() {
   if (process.argv.includes('--update-baseline')) {
     writeFileSync(baselinePath, JSON.stringify({
       scenario: scenarioName, fingerprint: fingerprint(result), pngHash: pngHash.toString(16),
-      note: 'sequence is the hard expectation; pngHash is advisory until T1.14 (residual rasterization flake) is closed',
+      note: 'sequence and pngHash are both hard expectations (byte determinism proven 20/20 on GPU and SwiftShader, T1.14 closed)',
     }, null, 1));
     console.log('BASELINE UPDATED: ' + baselinePath);
   } else {
@@ -160,11 +160,12 @@ async function main() {
       console.log('  If intentional: update the baseline in a separate, explained commit.');
       console.log('  Diff: ' + baselinePath);
       process.exitCode = 1;
+    } else if (baseline.pngHash !== pngHash.toString(16)) {
+      // Hard assertion since T1.14 closed: renders are byte-deterministic
+      // (verified 20/20 on both GPU and SwiftShader backends).
+      console.log('BASELINE PIXEL MISMATCH (hard failure).');
+      process.exitCode = 1;
     } else {
-      // Advisory pixel check: known residual flake (T1.14) may vary the hash.
-      if (baseline.pngHash !== pngHash.toString(16)) {
-        console.log('note: png hash differs from baseline (advisory only until T1.14 closes)');
-      }
       console.log('BASELINE MATCH ✓');
     }
   }
