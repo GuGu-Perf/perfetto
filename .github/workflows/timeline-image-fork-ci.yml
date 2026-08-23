@@ -11,6 +11,8 @@ on:
   push:
     branches: [pr1-timeline-image]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   typecheck-and-unittests:
     runs-on: ubuntu-latest
@@ -37,10 +39,12 @@ jobs:
           ./node_modules/.bin/tsc --noEmit 2>&1 | tee tsc.log
       - name: Unit tests (full suite)
         run: ./node_modules/.bin/vitest run --config vitest.config.mjs
-      - name: Upload tsc log on failure
+      - name: Publish tsc log to the ci-logs branch
         if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tsc-log
-          path: ui/tsc.log
-          if-no-files-found: warn
+        shell: bash
+        run: |
+          git config user.name 'ci-log-bot'
+          git config user.email 'ci-log@localhost'
+          git add ui/tsc.log
+          git commit -m 'ci: tsc log for run ${GITHUB_RUN_ID}'
+          git push origin HEAD:ci-logs
