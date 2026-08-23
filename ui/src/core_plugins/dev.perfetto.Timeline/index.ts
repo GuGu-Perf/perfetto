@@ -90,8 +90,15 @@ async function renderTimelineImageAdapter(
   trace: TraceImpl,
   opts: Partial<TimelineImageOptions>,
 ): Promise<TimelineImageRenderOutput> {
-  const defaultUris = collectLeafTrackUris(trace.defaultWorkspace.tracks);
-  const requested = opts.trackUris ?? defaultUris;
+  // Default collection (no explicit trackUris): mirror exactly what the
+  // interactive tree shows — group header rows (summary/headless
+  // containers, expanded or collapsed) plus leaf tracks, in tree order.
+  // Explicit trackUris keeps the flat-URI semantics (headless URIs expand
+  // to their leaf descendants).
+  const defaultNodes = opts.trackUris
+    ? undefined
+    : collectDefaultTrackNodes(trace.defaultWorkspace.tracks);
+  const requested = opts.trackUris ?? [];
   const pinned = opts.pinTracks ?? [];
   const pinnedSet = new Set(pinned);
   const ordered = [
@@ -114,6 +121,7 @@ async function renderTimelineImageAdapter(
   const output = await renderOffscreenTimeline({
     trace,
     trackUris: ordered,
+    trackNodes: defaultNodes,
     timeSpan,
     widthPx: opts.widthPx ?? 1920,
     devicePixelRatio: opts.devicePixelRatio,
@@ -125,20 +133,30 @@ async function renderTimelineImageAdapter(
   return output;
 }
 
-function collectLeafTrackUris(node: TrackNode): string[] {
-  const uris: string[] = [];
-  // Default collection mirrors what the UI shows after loading: a collapsed
-  // summary group contributes only its own (summary) track, and headless
-  // grouping containers are skipped entirely (they have no renderer).
-  if (node.isSummary && !node.expanded) {
-    if (node.uri && !node.headless) uris.push(node.uri);
-    return uris;
-  }
-  if (node.uri && !node.headless) {
-    uris.push(node.uri);
-  }
-  for (const child of node.children) {
-    uris.push(...collectLeafTrackUris(child));
-  }
-  return uris;
+/**
+ * The rows the interactive timeline would show for the default workspace:
+ * every group container contributes its own (18px summary) row, plus its
+ * children when expanded; plain leaf tracks contribute themselves. Group
+ * containers may be headless and/or URI-less — the interactive tree still
+ * shows them as title rows, so they are collected as nodes, not URIs.
+ */
+function collectDefaultTrackNodes(
+  node: TrackNode,
+): {node: TrackNode; depth: number}[] {
+  const rows: {node: TrackNode; depth: number}[] = [];
+  const walk = (n: TrackNode, d: number) => {
+    for (const child of n.children) {
+      const isGroup = child.isSummary || child.headless;
+      if (isGroup) {
+        rows.push({node: child, depth: d});
+        if (child.expanded) walk(child, d + 1);
+      } else {
+        rows.push({node: child, depth: d});
+        // Non-group nodes with children (rare) still descend.
+        if (child.children.length > 0) walk(child, d + 1);
+      }
+    }
+  };
+  walk(node, 0);
+  return rows;
 }

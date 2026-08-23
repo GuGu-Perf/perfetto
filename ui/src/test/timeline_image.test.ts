@@ -381,4 +381,44 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.shellColors).toBeGreaterThan(2);
     expect(result.axisColors).toBeGreaterThan(2);
   });
+
+  test('G1: default composition matches the live UI track order', async () => {
+    // Golden scenario: no trackUris/timeSpan (all defaults). The offscreen
+    // track list must match what the interactive UI actually shows — same
+    // set (default-expanded workspace semantics) and, critically, the same
+    // top-to-bottom ORDER, asserted against the live DOM's track titles.
+    // This is the institutional guard against "parameter drift" between
+    // demo renders (plan v9.11): the default is defined by the UI, not by
+    // whatever list a script happens to build.
+    const result = await helper.page.evaluate(async () => {
+      const trace = window.ctx as unknown as TestTrace;
+      const r = await trace.timelineImage.renderTimelineImage({
+        widthPx: 1600,
+        // Default-track lists on this fixture are ~6400px tall; at the
+        // default dpr 2 that exceeds the 32M-pixel canvas guardrail.
+        devicePixelRatio: 1,
+        perTrackTimeoutMs: 30_000,
+      });
+      // Titles as the UI lays them out (DOM order = visual order).
+      const uiTitles = [...document.querySelectorAll('.pf-track__title')]
+        .map((e) => (e.textContent ?? '').trim())
+        .filter((t) => t.length > 0);
+      return {
+        warnings: [...r.warnings],
+        height: r.height,
+        trackCount: r.trackBoxes.length,
+        uiVisibleCount: uiTitles.length,
+        // First tracks for order comparison (UI renders only the viewport).
+        uiHead: uiTitles.slice(0, 10),
+        offscreenHead: r.trackBoxes.slice(0, 10).map((b) => b.name),
+      };
+    });
+    expect(result.warnings).toEqual([]);
+    // The offscreen render includes every default track; the DOM only
+    // materializes the viewport, so compare the common prefix.
+    expect(result.trackCount).toBeGreaterThanOrEqual(result.uiVisibleCount);
+    const k = Math.min(result.uiHead.length, result.offscreenHead.length);
+    expect(k).toBeGreaterThanOrEqual(5);
+    expect(result.offscreenHead.slice(0, k)).toEqual(result.uiHead.slice(0, k));
+  });
 });

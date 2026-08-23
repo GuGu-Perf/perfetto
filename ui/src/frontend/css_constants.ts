@@ -30,6 +30,9 @@ export let COLOR_TEXT_MUTED = 'hotpink';
 export let COLOR_NEUTRAL = 'hotpink';
 export let COLOR_HIGHLIGHT = 'hotpink';
 export let COLOR_TIMELINE_OVERLAY = 'hotpink';
+export let COLOR_TRACK_SUMMARY_COLLAPSED = 'hotpink';
+export let COLOR_TRACK_SUMMARY_EXPANDED = 'hotpink';
+export let COLOR_TRACK_SUMMARY_EXPANDED_TEXT = 'hotpink';
 
 export function setTrackShellWidth(width: number) {
   TRACK_SHELL_WIDTH = Math.round(width);
@@ -76,4 +79,13 @@ export function initCssConstants(element?: Element) {
   COLOR_HIGHLIGHT = getCssStr('--pf-color-highlight') ?? COLOR_HIGHLIGHT;
   COLOR_TIMELINE_OVERLAY =
     getCssStr('--pf-color-timeline-overlay') ?? COLOR_TIMELINE_OVERLAY;
+  COLOR_TRACK_SUMMARY_COLLAPSED =
+    getCssStr('--pf-color-track-summary-collapsed') ??
+    COLOR_TRACK_SUMMARY_COLLAPSED;
+  COLOR_TRACK_SUMMARY_EXPANDED =
+    getCssStr('--pf-color-track-summary-expanded') ??
+    COLOR_TRACK_SUMMARY_EXPANDED;
+  COLOR_TRACK_SUMMARY_EXPANDED_TEXT =
+    getCssStr('--pf-color-track-summary-expanded-text') ??
+    COLOR_TRACK_SUMMARY_EXPANDED_TEXT;
 }

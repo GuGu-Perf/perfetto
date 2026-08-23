@@ -50,6 +50,9 @@ import {
   COLOR_BORDER,
   COLOR_TEXT,
   COLOR_TEXT_MUTED,
+  COLOR_TRACK_SUMMARY_COLLAPSED,
+  COLOR_TRACK_SUMMARY_EXPANDED,
+  COLOR_TRACK_SUMMARY_EXPANDED_TEXT,
   FONT_COMPACT,
   TRACK_SHELL_WIDTH,
 } from '../../frontend/css_constants';
@@ -88,8 +91,16 @@ const SHELL_FONT = `300 14px ${FONT_COMPACT}`;
 
 export interface OffscreenTimelineRenderOptions {
   readonly trace: TraceImpl;
-  // Ordered list of track URIs to render, top to bottom.
+  // Ordered list of track URIs to render, top to bottom. Ignored when
+  // `trackNodes` is provided.
   readonly trackUris: readonly string[];
+  // Pre-resolved nodes in final order (adapter default collection): each
+  // entry renders as-is, group headers included (18px summary rows, matching
+  // the interactive tree). Takes precedence over `trackUris`.
+  readonly trackNodes?: ReadonlyArray<{
+    node: TrackNode;
+    depth: number;
+  }>;
   readonly timeSpan: HighPrecisionTimeSpan;
   // Width of the produced image in CSS pixels.
   readonly widthPx: number;
@@ -127,6 +138,9 @@ export interface OffscreenTimelineRenderOutput {
     height: number;
     // Nesting depth in the workspace tree, used for shell indentation.
     depth: number;
+    // Group (summary/headless container) title rows render as 18px headers.
+    readonly isGroupHeader: boolean;
+    readonly expanded: boolean;
   }>;
   // Tracks whose data did not become ready within the per-track budget.
   readonly timedOutTracks: readonly string[];
@@ -150,6 +164,7 @@ export async function renderOffscreenTimeline(
     maxRounds = 3,
     includeTrackShell = true,
     includeTimeAxis = true,
+    trackNodes,
   } = options;
 
   // ------------------------------------------------------------------ layout
@@ -163,35 +178,74 @@ export async function renderOffscreenTimeline(
     top: number;
     height: number;
     depth: number;
+    isGroupHeader: boolean;
+    expanded: boolean;
   }[] = [];
   const missingTracks: string[] = [];
   // Track vertical bounds are canvas-absolute: they start below the time
   // axis row, as TrackView.drawCanvas places tracks at verticalBounds.top.
   let top = axisHeight;
-  for (const uri of trackUris) {
-    // Headless nodes are grouping containers (e.g. a thread node holding its
-    // slice & state tracks); expand them so the requested tracks actually
-    // render instead of collapsing to zero height.
-    const nodes = resolveRenderableTrackNodes(trace, uri);
-    if (nodes.length === 0) {
-      missingTracks.push(uri);
-      continue;
-    }
-    const requestDepth = uriDepth.get(uri) ?? 0;
-    for (const node of nodes) {
-      const view = new TrackView(trace, node, top, false);
-      trackViews.push(view);
-      const nodeUri = node.uri ?? uri;
-      trackBoxes.push({
-        uri: nodeUri,
-        name: node.name,
-        top,
-        height: view.height,
-        // Expanded descendants render one level deeper than the request.
-        depth: uriDepth.get(nodeUri) ?? requestDepth + 1,
+  interface LayoutEntry {
+    node: TrackNode;
+    depth: number;
+    uri: string;
+    isGroupHeader: boolean;
+    expanded: boolean;
+  }
+  const entries: LayoutEntry[] = [];
+  if (trackNodes) {
+    // Pre-resolved default collection: group header rows (summary or
+    // headless containers) render as 18px title rows, exactly the rows the
+    // interactive tree shows.
+    for (const {node, depth} of trackNodes) {
+      const isGroupHeader = node.isSummary || node.headless;
+      entries.push({
+        node,
+        depth,
+        uri: node.uri ?? '',
+        isGroupHeader,
+        expanded: node.expanded,
       });
-      top += view.height;
     }
+  } else {
+    for (const uri of trackUris) {
+      // Headless nodes are grouping containers (e.g. a thread node holding
+      // its slice & state tracks); expand them so the requested tracks
+      // actually render instead of collapsing to zero height.
+      const nodes = resolveRenderableTrackNodes(trace, uri);
+      if (nodes.length === 0) {
+        missingTracks.push(uri);
+        continue;
+      }
+      const requestDepth = uriDepth.get(uri) ?? 0;
+      for (const node of nodes) {
+        const nodeUri = node.uri ?? uri;
+        entries.push({
+          node,
+          // Expanded descendants render one level deeper than the request.
+          depth: uriDepth.get(nodeUri) ?? requestDepth + 1,
+          uri: nodeUri,
+          isGroupHeader: false,
+          expanded: false,
+        });
+      }
+    }
+  }
+  for (const {node, depth, uri, isGroupHeader, expanded} of entries) {
+    // showHeadless=true: group header rows (headless summary containers)
+    // get their 18px title height instead of collapsing to zero.
+    const view = new TrackView(trace, node, top, true);
+    trackViews.push(view);
+    trackBoxes.push({
+      uri,
+      name: node.name,
+      top,
+      height: view.height,
+      depth,
+      isGroupHeader,
+      expanded,
+    });
+    top += view.height;
   }
   if (trackViews.length === 0) {
     throw new Error(
@@ -207,7 +261,8 @@ export async function renderOffscreenTimeline(
   // Webfonts load asynchronously with font-display: swap; drawing text
   // before they are ready would use fallback glyphs and differ between
   // renders, breaking determinism (and visual parity with the live UI).
-  if (typeof document !== 'undefined') {
+  // jsdom has no FontFaceSet; guard for test environments.
+  if (typeof document !== 'undefined' && document.fonts) {
     await document.fonts.ready;
   }
 
@@ -430,6 +485,7 @@ export async function renderOffscreenTimeline(
     // coordinate space (the dpr transform above applies to the 2D ctx too).
     // Opaque backgrounds also clip any gridline overdraw into their strips.
     if (includeTrackShell) {
+      drawGroupHeaderRows(d2Ctx, trackBoxes, cssWidth);
       drawTrackShell(d2Ctx, trackBoxes, shellWidth);
     }
     if (includeTimeAxis) {
@@ -549,6 +605,34 @@ function clipText(
 }
 
 /**
+ * Group header rows: the interactive tree paints summary containers with a
+ * tinted background across the whole row (collapsed and expanded use
+ * different theme colors); expanded headers also flip their text color.
+ * Drawn before shell text so the title renders on top.
+ */
+function drawGroupHeaderRows(
+  ctx: CanvasRenderingContext2D,
+  boxes: ReadonlyArray<{
+    name: string;
+    top: number;
+    height: number;
+    isGroupHeader: boolean;
+    expanded: boolean;
+  }>,
+  cssWidth: number,
+): void {
+  ctx.save();
+  for (const box of boxes) {
+    if (!box.isGroupHeader || box.height <= 0) continue;
+    ctx.fillStyle = box.expanded
+      ? COLOR_TRACK_SUMMARY_EXPANDED
+      : COLOR_TRACK_SUMMARY_COLLAPSED;
+    ctx.fillRect(0, box.top, cssWidth, box.height);
+  }
+  ctx.restore();
+}
+
+/**
  * Track shell column: names indented by workspace depth, one line per track,
  * with row separators. A canvas-drawn simplification of the interactive
  * DOM shell (no expand arrows or hover affordances), matching its computed
@@ -562,6 +646,8 @@ function drawTrackShell(
     top: number;
     height: number;
     depth: number;
+    isGroupHeader: boolean;
+    expanded: boolean;
   }>,
   shellWidth: number,
 ): void {
@@ -572,9 +658,12 @@ function drawTrackShell(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   for (const box of boxes) {
+    if (box.height <= 0) continue;
     const x =
       Math.max(0, box.depth) * SHELL_INDENT_PX + SHELL_TITLE_OFFSET_PX;
-    ctx.fillStyle = COLOR_TEXT;
+    ctx.fillStyle = box.isGroupHeader && box.expanded
+      ? COLOR_TRACK_SUMMARY_EXPANDED_TEXT
+      : COLOR_TEXT;
     ctx.fillText(
       clipText(ctx, box.name, shellWidth - 4 - x),
       x,
