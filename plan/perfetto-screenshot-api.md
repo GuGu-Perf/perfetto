@@ -705,6 +705,7 @@ trace.pftrace
 | v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
 | v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
 | v9.20 | 08-23 | 文档结构治理：修订史/任务表瘦身、D.5 执行日志新增、设计区与实现同步 |
+| v9.22 | 08-23 | **T1.14 收口（根因非 MSAA）**：用户质疑原方案（量化噪声找容差）非正面 → 业界调研（playwright/perfetto 官方皆 threshold+maxDiffPixels 容差制；SwiftShader=确定性渲染业界标准；pixelmatch/SSIM=感知度量主流）→ 方案改为根治+契约对齐 → 实验链：SwiftShader 同样 2/20 抖动（证伪光栅化假设）→ 差异像素聚类定位单一 slice 标签区 → 真因 fixed-point maxRounds=3 截断 → 修复后双后端 20/20 字节全等，基线像素 hash 升格硬断言；附：原"100 次采样"方案废弃 |
 | v9.21 | 08-23 | T1.29 全量回归闭环：a) 修 6 文件格式/lint（全量验证即时显价值）；b) 干净全量 31 spec——13 过/timeline_image 9-9/39 失败 100% 像素基线 diff（环境性豁免，三重证据）/40 链式跳过；首轮 daemon 干扰识别并消除；c) 归因矩阵归档。**结论：无功能回归；像素类最终裁决待 Linux CI（T1.0）** |
 
 ## 附录 D：执行跟踪表（Execution Tracker）
