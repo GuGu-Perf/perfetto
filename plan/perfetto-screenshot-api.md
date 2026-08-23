@@ -226,54 +226,53 @@ export interface OffscreenRenderResult {
 4. **提取而非复用 `TrackTreeView.drawCanvas`**：它是 private 且绑定 Mithril/VirtualOverlayCanvas 生命周期（`raf.addCanvasRedrawCallback`）。将绘制序列（网格 → track → flow events → notes → overlay）提取为以 `(timeScale, widthPx, trackViews, format)` 为入参的纯函数，UI 主路径与离屏路径共用（无行为变化，上游加分项）；时间轴刻度密度算法同步接受任意宽度。
 5. 时间轴/网格/track shell 复用 `time_axis_panel` 等既有绘制逻辑；字体确定性：绘制前 `await document.fonts.ready`。
 
-### 3.4 L2 — public API：`trace.renderTimelineImage()`
+### 3.4 L2 — public API：`trace.timelineImage.renderTimelineImage()`
 
-新文件 `ui/src/public/timeline_image.ts`：定义 `TimelineImageManager` 接口与选项/结果类型（纯声明，对齐 `public/minimap.ts` 的粒度）；实现于 `core/timeline_image_manager.ts`（注册制，只 import base+public），由 Timeline 插件注册绘制函数（§3.2）。`renderTimelineImage()` 挂到 `Trace` 接口（`TraceImpl` 委托实现——`scrollTo`/minimap 已有同样先例；`createFakeTraceImpl` 复用真实 TraceImpl，测试 fake 无需修补）：
+> **实现即权威**：以 `ui/src/public/timeline_image.ts` 为准；本节为同步快照（v9.20 对齐）。
 
 ```ts
-export interface TimelineImageOptions extends OffscreenRenderOptions {
-  // 置顶排序：pinTracks 中的 uri 提到图像最上方（保持 trackUris 内相对序）。
-  // 语义：pin 的 track 必须同时出现在 trackUris（或缺省集合）中才渲染，
-  // 仅出现在 pinTracks 而不在渲染集合中的 uri 记 TRACK_NOT_RENDERED warning。
-  pinTracks?: readonly string[];
-  format?: 'image/png' | 'image/jpeg';
-  budget?: TimelineImageBudget;           // 见 §5.3
-  stitch?: boolean;                       // 超高分片，见 §5.3 第 5 条
-  onProgress?(progress: TimelineImageProgress): void;
-}
-
-export interface TimelineImageResult {
-  blob: Blob;
-  width: number; height: number;       // 实际输出（可能因 matchUi/降级改变）
-  completedTracks: readonly string[];
-  warnings: readonly TimelineImageWarning[];  // TIMEOUT | DOWNSCALED | CLIPPED |
-                                           // TRACK_MISSING | TRACK_NOT_RENDERED |
-                                           // TIMELINE_UNAVAILABLE | BUSY | ...
-  // 渲染元数据：功能断言（§6.2）与调用方图像后处理（叠加标注/热点图）的依据
-  metadata?: {
-    // 每个已渲染 track 的名称与包围盒（相对输出图像，CSS px × dpr）
-    trackBoxes: ReadonlyArray<{uri: string; name: string; y: number; height: number}>;
-    // 实际绘制的组件清单（'timeAxis' | 'trackShell' | 'grid' | 'selection' | 'notes'）
-    components: readonly string[];
-    // track shell 中绘制的文本（track 名称等，按出现序）——shell 文本由
-    // fillText 绘制、无 DOM 可查，这是文本正确性的唯一可编程断言途径
-    drawnTexts: readonly string[];
-  };
-  perf: {loadMs: number; drawMs: number; encodeMs: number;
-         cacheHits: number; queries: number; elapsedMs: number};
-}
-
 renderTimelineImage(opts?: Partial<TimelineImageOptions>): Promise<TimelineImageResult>;
+
+interface TimelineImageOptions {
+  // —— 数据选择 ——
+  trackUris?: readonly string[];          // 自上而下顺序；缺省=workspace 默认可见行（组标题行含，与 UI 同序）
+  trackNames?: readonly {name: string; tid?: number; pid?: number}[];  // 人类语义定位，解析后并入 trackUris
+  pinTracks?: readonly string[];          // 置顶（须同时在渲染集合中）
+  timeSpan?: {start: time|string; end: time|string};  // ns；字符串兼容 postMessage/JSON
+  // —— 形状（同一自由度，互斥）——
+  widthPx?: number;                       // 默认 1920
+  aspectRatio?: number;                   // width = round(height × ratio)，高度恒由 track 集合导出
+  // —— 清晰度/精度（独立维度）——
+  devicePixelRatio?: number;              // 默认 2；超画布护栏自动降 1（result 如实报告）
+  dataResolutionScale?: number;           // 默认 0.5（1x 数据画 2x 画布）
+  // —— 组件（allowlist；DOM chrome 架构上不存在，无开关）——
+  includeTrackShell?: boolean;            // 名称列，默认 true
+  includeTimeAxis?: boolean;              // 时间刻度行，默认 true
+  perTrackTimeoutMs?: number;             // 默认 5000；后续轮上限 5s
+  format?: 'image/png' | 'image/jpeg';
+}
+
+interface TimelineImageResult {
+  blob: Blob;
+  width: number; height: number;
+  devicePixelRatio: number;               // 有效值（协商后）
+  trackBoxes: readonly {uri; name; top; height; depth; isGroupHeader?; expanded?}[];
+  warnings: readonly ('TIMELINE_UNAVAILABLE'|'TRACK_MISSING'|'TRACK_NOT_RENDERED'|'TIMEOUT')[];
+  perf: {loadMs; drawMs; encodeMs; elapsedMs};
+}
 ```
 
 **语义规范**：
-- **snapshot**：读取调用时刻的 workspace/track 状态渲染，不改变用户 UI 状态（`pinTracks` 只影响截图内排序，不动真实 workspace）。
-- **前置条件**：`renderTimelineImage` 是 `Trace` 实例方法，天然只在 trace 加载完成后可用；trace 未就绪时 L3 入口的排队语义见 §3.5(a)。
-- **错误**（reject）：参数非法（widthPx≤0、trackUris 全部不存在）、trace 引擎已 dispose；其余异常情况一律走 `warnings` + 尽力输出（partial）。
+- **snapshot**：读取调用时刻的 workspace/track 状态渲染，不改变用户 UI 状态；确定性输入语义（workspace 状态属隐式输入）见 T1.21。
+- **前置条件（T1.16）**：内部等待 `!isLoadingTrace && workspace 有 track`（30s 预算），堵半建树竞态；超时明确报错。
+- **错误**（reject）：参数非法（widthPx≤0、widthPx×aspectRatio 同传、trackUris 全部不存在）、护栏 1x 仍溢出；其余异常走 `warnings` + 尽力输出。
+- **guarantee 契约**：输出仅含时间线画布内容；无 DOM chrome/交互态/session 痕迹（弹窗免疫已实证）；同输入同输出（T1.14 残差收口前像素 hash 为 advisory）。
 
 ### 3.5 L3 — 调用入口
 
-**(a) postMessage 协议扩展（主入口）**——`post_message_handler.ts` 新增消息：
+**(a) postMessage 协议扩展（主入口）——已实现（M2，v9.18）**：`{perfetto: {action: 'renderTimelineImage', id, options}}`；挂起 60s 等 trace（与 trace 投递背靠背）、并发 1 + 队列 32（最老溢出显式拒绝）、响应 `{perfetto: {action: 'renderTimelineImageResult', id, png: ArrayBuffer, result: {meta} | error}}` 回 event.origin（COOP 'null' 时 '*'）。协议文档 docs/visualization/embedding-api-reference.md；demo tools/timeline-image/postmessage-demo.mjs。原设计分块协议未采用（ArrayBuffer 结构化克隆即可传 PNG）。历史设计：
+
+——`post_message_handler.ts` 新增消息：
 
 ```jsonc
 // 请求
@@ -477,6 +476,21 @@ interface TimelineImageBudget {
 | 跨 fixture 冒烟 | 5 份 fixture 全部"加载 → render → 非纯色 + metadata 完整" | 覆盖 protobuf/设备/场景差异 |
 | GL 生命周期 | 连续 20 张（含分片）无 context lost；`loseContext()` 重建后可用 | §3.3.4 单例规则验证 |
 
+**覆盖状态映射（v9.20）**——八组矩阵 ↔ 已落地测试/场景：
+
+| 组 | 现状 |
+|---|---|
+| 参数边界 | 部分：互斥/widthPx≤0/aspectRatio≤0 单测 ✅；零宽/越界窗待补 |
+| 确定性/幂等 | 字节级断言 ✅（残余 T1.14：advisory hash） |
+| 并发/竞争 | 阶段 B 冻结修复 ✅；并发双请求（postMessage 队列语义）已实现待专门用例 |
+| 降级 | WebGL 回退路径 ✅（Canvas2DRenderer）；超时 partial/TIMEOUT warning ✅；护栏降 dpr ✅ |
+| 协议 | postMessage 挂起/队列/错误通道 ✅（demo 实证）；乱序/重复 id 待补 |
+| matchUi 不变式 | 设计保留（queryBounds 精确窗口已实现更强语义） |
+| 跨 fixture 冒烟 | 6 fixture 扫描 ✅（T1.15，零空白） |
+| GL 生命周期 | 20 连拍 ✅ + MAX_RENDERS_PER_CONTEXT 主动回收；被动 lost 挂账 T1.20 |
+
+**黄金场景与基线**（D.4 制度）：G-STD（用户标准集）/G-DEFAULT（零参数语义）/G-E1（用户用例）冻结于 tools/timeline-image/baselines/，runner 验证 mismatch 即 fail；全量官方 31 spec 回归=T1.29（待执行）。
+
 ### 6.4 验收基准与 CI 看护
 
 全部以"实际渲染的 track 数"为口径（与 slice 总数无关，mipmap 保护）：
@@ -668,38 +682,29 @@ trace.pftrace
 
 ## 附录 C：修订史
 
-| 版本 | 日期 | 摘要 |
-|---|---|---|
-| v1 | 2026-08-22 | 初版：三层架构、性能设计、加载流水线（三轮逻辑 review 后定稿） |
-| v2 | 2026-08-22 | 首轮 review 修订：缓存命中修正、加载/绘制解耦、WebGL 后端决策、URL 入口降级、MCP 入口、部署约束 |
-| v3 | 2026-08-22 | 二轮 review 修订：渲染上下文显式化、WebGL 读回/context 复用、matchUi 不变式、Blob 响应、成本模型 3x 系数 |
-| v4 | 2026-08-22 | 三轮 review 修订：padding 回看、能力声明、barrier 同任务绘制、定点迭代、基线环境前置核实 |
-| v5 | 2026-08-23 | 深度验证轮：mipmap 算子边界行为实测（撤销 padding 论断）、minimap 模式落位（修复分层倒置）、resolution 既有字段（撤销接口变更）、AsyncMemo 取消语义、postMessage 排队语义、官方基线机制核实、改名 renderTimelineImage |
-| v6 | 2026-08-23 | 渲染元数据入 API、四层功能断言、5 份真实 fixture 落库 |
-| v7 | 2026-08-23 | 自编译 trace_processor_shell 实测真实参数集（A1–C1）、八组补充用例清单 |
-| v8 | 2026-08-23 | 计划质量要素补齐：DoD/依赖图/sizing/回滚、四类劣化处置矩阵、看护指标、用户层成功指标、ADR、non-goals |
-| v9 | 2026-08-23 | 结构重组定稿：选型前移、测试聚合（§6）、加载流水线归部署（§8.2）、清除正文版本标记、TL;DR、去重（matchUi/边界断言/信任模型收敛至唯一权威位置）、ADR/修订史入附录 |
-| v9.1 | 2026-08-23 | 执行跟踪并入本文档为附录 D（原独立 EXECUTION.md 撤销；单文档原则），设"对外分享截至附录 C"分界；正文零改动 |
-| v9.2 | 2026-08-23 | 末轮疏漏修复：AGPL fixture local-only + 上游合成 trace（ADR12）、拆 PR 0（ADR11）、postMessage 队列上限与失败清空、trackNamePatterns ReDoS 防护、locale 确定性验证（T1.11）、测试环境任务（T1.0）、feature flag 讨论项 |
-| v9.3 | 2026-08-23 | 新增 §6.5 开发期观测与调试（ADR13：复用 traceEvent/queryLog/sqlstats/metatrace，截图管线打点设计，双轨耗时统计）；D.4 产物增 querylog/metatrace；任务 T1.12 |
-| v9.5 | 2026-08-23 | 执行审计修正：D.4 增补 spec 产物路径并诚实登记六件套执行缺口；新立 T1.13（产物补齐）/T1.14（确定性残余 ⛔ 立账）；纠正变更流违规（代码先行、文档后补） |
-| v9.6 | 2026-08-23 | 人工 review 触发三缺陷修复并回归：B1 headless 容器零高度（离屏展开为叶子）、B2 CpuFreqTrack 窄窗口整条空白（补 whenDataReady+queryBounds）、warm-up 串行最坏 N×预算（并行化 + 后续轮 5s 上限，端到端 209ms/图）；timeSpan 字符串归一化入公共 API；新立 T1.15（track 覆盖率清单）/T1.16（workspace 时序竞争）；验证方法论新增像素级 band 分析（逐 track 非背景覆盖率 + 颜色数，自动检出空白带，替代肉眼 review 的不可靠性） |
-| v9.7 | 2026-08-23 | 需求对齐会话启动：UI 元素全景标注截图（out/test-runs/20260823-ui-element-survey，9 区域编号，用户勾选后映射 C1 include 开关）；T1.17 native tp 测试默认化完成（daemon + 自动协商，加载提速实测）；C1 差距再次确认（track 名称列 = 用户明确要求保留项） |
-| v9.8 | 2026-08-23 | C1 终态定稿（owner 决策经用户确认）：**allowlist 构造模型**取代组件排除矩阵——include 仅 `includeTrackShell`/`includeTimeAxis` 两项（默认 true），preset 三档移除（YAGNI），17 类组件清单降级为内部测试 checklist（T1.18）+ 文档 guarantee 契约（输出仅含时间线画布内容；无 DOM chrome/交互态/session 痕迹；同输入同输出）；弹窗免疫已实证（注入 modal 后输出逐字节不变）。**同日落地质件并合入**：名称列（250px、depth 缩进、单行省略、行分隔）+ 时间轴行（22px、Start/Span、Timecode 双行标签、locale 无关）离屏渲染，trackBoxes 增 depth；全关时与旧输出字节兼容；6/6 集成 + 2564 单测绿；step3 产物 out/test-runs/20260823-step3-shell-timeaxis（229ms，10/10 track 有内容） |
-| v9.9 | 2026-08-23 | 样式真值对齐（用户对比 UI 截图发现差异）：装饰常量从"猜"改为"读 SCSS/DOM computed style 真值"——14px/300 condensed、透明 shell 背景（页面底色透出）、缩进 depth×8+3、行 border-bottom、Start:/Duration: 复刻 TimeAxisPanel；颜色走运行时 CSS 变量自动跟随亮/暗主题。**一致性契约定为"视觉等同（visual parity），非像素等同"**：残余差异仅 canvas fillText 与 DOM 文字光栅化的亚像素级（浏览器字体渲染路径不同，不可消除，若强求需 DOM 渲染将破坏确定性/无 DOM 架构）。产物 out/test-runs/20260823-step4-style-align（offscreen vs ui-reference 并排对比） |
-| v9.10 | 2026-08-23 | 用户四连问（自造 or 复用？/参考图弹窗/为何只有 cpu0-3/还有哪些漏洞）触发系统性自审：**T1.19 webfont 时序真 bug 即修**（fonts.ready await，swap 模式下首渲染 fallback 字形破坏确定性）；复用边界澄清（track 数据层同码复用，装饰层样式复刻——DOM 无法进 canvas 是架构约束）；step5 example 0-8 全 CPU 验证（18 track，证 cpu0-3 是参数选择非能力缺失）；新立 T1.20 GL context lost / T1.21 确定性输入语义 / T1.22 manual run helper 纪律 |
-| v9.11 | 2026-08-23 | 用户质询"为何每次修改都引入新问题"触发**制度性纠正**：根因=无黄金场景集（每张交付图参数临时手造）+ 断言不校验顺序与集合（靠人眼兜底）+ 演示图混作交付物。落地：**G1 默认场景序列断言**（离屏 title 序列 == UI DOM .pf-track__title 序列，"与浏览器一致"从人眼观察升级为回归断言）；G1 上线即抓真缺陷并修复——默认收集丢**组标题行**（CPU 组无 uri、thread 组 headless，扁平 URI 收集器全跳过，UI 实为 18px 标题行）→ 默认路径改为节点序列收集（collectDefaultTrackNodes，语义=TrackTreeView 可见行）+ 组行主题背景（summary-collapsed/expanded，随主题）+ trackBoxes 增 isGroupHeader/expanded；新立 T1.23（默认参数大 trace 超 32M 护栏开箱抛错）/T1.24（黄金场景矩阵与交付纪律）；产物 out/test-runs/20260823-g1-default-golden（174 track 6579px 475ms，序列逐项对齐） |
-| v9.12 | 2026-08-23 | 用户再次质询（ui-reference 弹窗又现 + "174 条从哪来、参数要固定"）→ **制度代码化**（T1.25 ✅）：场景注册表冻结进 tools/timeline-image/run-golden.mjs——G-STD（用户标准工作集：pin RenderThread 置顶 + cpu0-3 freq+sched + A2 窗，step2 已认可参数）/G-DEFAULT（零参数=UI 全量 174）；runner 内置空 daemon（根除 preloaded 弹窗）/弹窗 dismiss 兜底/六件套产物；交付纪律执行：review 图只出自 runner。命名澄清：**"standard"=G-STD（10 条）**；零参数默认=G-DEFAULT（174 条=UI 全部可见行，属正确行为而非异常），两者在 API 文档与交付说明中显式区分 |
-| v9.13 | 2026-08-23 | 用户结构性质询（"改的是接口内部实现，测试写外部脚本调 API——是否解耦？"）→ 审计结论：**调用方式已解耦**（集成测试/runner 均黑盒走公共 API），**期望未解耦**（实现 commit 常同步改期望，绿灯无法证明无回归，用户人眼是唯一独立校验）→ **基线冻结机制落地**（T1.26 ✅）：baselines/&lt;场景&gt;.json 硬期望（尺寸/warnings/track 全序列）+ advisory 像素 hash（T1.14 收口后升格硬断言）；mismatch 即 fail；更新基线须显式 --update-baseline + 独立说明 commit；基线入 git 可 review。G-STD/G-DEFAULT 双场景基线建立并验证通过（序列+像素 hash 双一致） |
-| v9.14 | 2026-08-23 | **首个用户亲写测试用例入库**（G-E1）：example trace、slice[95635]（dispatchFrameCallbacks）..slice[115701]（DrawFrames）窗口（用户给的 UI timecode 与 trace_processor 交叉验证**完全自洽**：domain 原点 traceInfo.start=3424607565230，两 slice ts 精确对齐）、RenderThread tid 4543 pin、standard 模式（全 CPU freq+sched 按 UI 组序）、横向 4:3。runner 扩展：场景级 trace/workspace marker/aspectRatio（两段渲染：track 定高 → widthPx=height×ratio）；产出 913×685（精确 4:3）20 track 零 warnings，基线冻结+验证 MATCH。**用例驱动两项 API 债立账**：T1.27 按名/tid 定位（用户给"RenderThread [4543]"，API 只收 uri）、T1.28 aspectRatio 参数 |
-| v9.15 | 2026-08-23 | **尺寸/定位 API 形态定稿并落地**（owner 设计经用户确认，T1.27+T1.28 ✅）：三层渐进披露——零配置（宽 1920/dpr 2/scale 0.5）/形状（widthPx 或 aspectRatio **互斥二选一**，高度恒由 track 集合导出，ratio 于布局后求解无探测渲染）/清晰度（dpr 独立维度）；`trackNames: [{name, tid?, pid?}]`（标题精确/前缀匹配、headless 组优先、uri 去重、未匹配 TRACK_MISSING）；warning 链路 offscreen→manager→公共 result 打通；G-E1 切换原生参数，基线逐字节一致（交叉验证）；9/9 集成 + 2566 单测 + 三基线 MATCH |
-| v9.16 | 2026-08-23 | **T1.15 覆盖率扫描闭环**：双层扫描工具入库（scan-tracks/scan-tracks-deep）——6 fixture 默认视图零空白 + noWarmup=0；jank fixture 1999 叶子全量分批渲染**零空白**，低覆盖 287 条抽查均为稀疏数据源正常表现；"某类 track 离屏空白"类别性风险在本 fixture 宇宙内正式关闭（新插件类型接入需重跑扫描，工具已固化） |
-| v9.17 | 2026-08-23 | **T1.23 护栏协商落地**：negotiateDpr 纯函数（请求 dpr 溢出画布上限→自动降 1x，1x 仍溢出才拒绝），result.devicePixelRatio 公共字段如实报告有效值——零配置调用在重 trace 工作区（默认收集 6000+px 高）不再开箱抛错；2568 单测 + 9 集成 + 三基线 MATCH |
-| v9.19 | 2026-08-23 | 用户质询"需求是否全完成、测试是否全面无死角"→ 官方流程对照盘点（tsc ✅/vitest 全量 ✅/eslint ⚠️/Playwright 31 spec ❌ 仅 1/像素基线 Linux-only 环境性）；需求完成度盘点（核心+M2 ✅；挂账 T1.13/T1.14/T1.20/T1.21/M3/上游准备）；**T1.29 全量回归计划立项，经用户 review 后执行** |
-| v9.18 | 2026-08-23 | **M2 里程碑达成（PR 2 核心）**：postMessage renderTimelineImage 入口（T2.1-T2.3 ✅）+ T1.16 双层闭环（API 等 !isLoadingTrace&&tracks、调度层等 trace）——外部程序经宿主页 iframe **一条消息链取回 PNG**（demo ~8s 端到端，两连跑稳定）；途中实证并修复半建树竞态（trackNames 曾误报 TRACK_MISSING）；用户质询"太慢"→制度再升级：验证脚本强制阶段计时+硬超时+daemon 内嵌管理（demo 曾因进程退出挂死被 150s 兜底捕获） |
-| v9.4 | 2026-08-23 | 新增 §5.4 性能优化方法论与杠杆清单（top-down 闭环：测全链路→阶段归因→攻大头→单变量→复测；16 项杠杆按阶段分组，含渲染服务真机 GPU/ANGLE 杠杆及像素一致性权衡）；§1.4/§8.5 交叉引用 |
+> 完整过程叙事见 D.5 执行日志；本表只记文档版本主题。v1–v9.5 详见 git 历史。
 
----
+| 版本 | 日期 | 主题 |
+|---|---|---|
+| v1–v4 | 08-22 | 初版三轮 review：架构/性能/加载流水线定稿 |
+| v5–v7 | 08-22 | review 漏洞修补、性能设计深化、测试判定设计 |
+| v8–v9 | 08-22 | 质量要素（DoD/回滚/矩阵/ADR/non-goals）、结构定稿（选型前移、去重） |
+| v9.1–v9.5 | 08-23 | 执行跟踪并入附录 D、AGPL fixture 隔离、观测埋点、执行审计立账 |
+| v9.6 | 08-23 | 人工 review 触发三缺陷修复（headless/窄窗 freq/串行 warm-up） |
+| v9.7 | 08-23 | UI 元素全景调研、native tp 测试默认化（T1.17） |
+| v9.8 | 08-23 | C1 终态：allowlist 两开关 + 组件宇宙盘点 + 弹窗免疫实证 |
+| v9.9 | 08-23 | 装饰样式真值对齐（visual parity 契约） |
+| v9.10 | 08-23 | 系统性自审：webfont 时序修复，T1.20–22 立账 |
+| v9.11 | 08-23 | 黄金场景制度：G1 顺序断言、组标题行修复 |
+| v9.12 | 08-23 | 场景注册表冻结 + runner（G-STD/G-DEFAULT） |
+| v9.13 | 08-23 | 期望与实现解耦：基线冻结机制 |
+| v9.14 | 08-23 | 首个用户用例 G-E1 入库；T1.27/T1.28 立账 |
+| v9.15 | 08-23 | 形状/定位 API 定稿（trackNames/aspectRatio 互斥） |
+| v9.16 | 08-23 | T1.15 覆盖率扫描闭环（零空白） |
+| v9.17 | 08-23 | T1.23 护栏协商（dpr 自动降级） |
+| v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
+| v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
+| v9.20 | 08-23 | 文档结构治理：修订史/任务表瘦身、D.5 执行日志新增、设计区与实现同步 |
 
 ## 附录 D：执行跟踪表（Execution Tracker）
 
@@ -761,25 +766,25 @@ trace.pftrace
 | T1.6 | GL context 单例 + `preserveDrawingBuffer` 读回 | 连续 20 张无 context lost；非纯色断言过 | T1.5 | ✅ | commit pr1-timeline-image | §3.3.4；共享 2D+GL 表面单例（WebGLRenderer 绑定双 ctx，二者同生命周期）、每 200 张 `loseContext()` 重建、无 GL 时 Canvas2D 回退；**E2E 20 连拍全过**（out/test-runs/20260823-0240-gl-singleton-20x：min 16 色、零 warning、零页面错误） |
 | T1.7 | public/timeline_image.ts + core/timeline_image_manager.ts + Trace 挂载 | 控制台 `trace.renderTimelineImage({...})` 出图；Timeline 缺席时 TIMELINE_UNAVAILABLE | T1.5 | ✅ | commit pr1-timeline-image | minimap 注册反转模式（§3.2）；API 形态为 `trace.timelineImage.renderTimelineImage(...)`（方法挂管理器）。**E2E 已验证**（out/test-runs/20260823-0230-first-e2e-demo）：1000×235 PNG 71.9KB、采样 53 色非纯色、8/8 track、零 warning、trackBoxes 正确；途中修复 timeSpan 序列化归一化（plain {start,end} → HighPrecisionTimeSpan）。TIMELINE_UNAVAILABLE 分支随 T1.8 单测覆盖 |
 | T1.8 | jsdom 单测（布局/预算/TimeScale/校验/warning） | 全绿；mock memo 覆盖超时软退出 | T1.7 | ✅ | commit pr1-timeline-image | 新增 offscreen_timeline_renderer_unittest（4 例，含抓出并修复 widthPx=0 被 Math.max 吞掉的真实边界漏洞）+ timeline_image_manager_unittest（3 例：TIMELINE_UNAVAILABLE/TIMEOUT 映射/编码失败）；全套 45/45 |
-| T1.9 | Playwright 全链路 + 基线 + 功能断言 | A1–C1 通过（本地真实 fixture）；**上游 PR 内用合成 trace 等价场景**；基线入库（合成 trace 基线） | T1.6, T1.7 | ✅ | commit pr1-timeline-image + ui/src/test/timeline_image.test.ts | 5/5 过（A2 pin 排序/堆叠布局、非纯色、**字节级确定性**、A1 边界左缘内容、A3 宽窗）；产物 PNG 持久化到 `out/ui/timeline_image_artifacts/<时间戳>-<用例>.png`（Playwright 仅对失败用例物化附件，spec 自行落盘）。确定性在真机 GPU headless 下有残余间歇抖动（逐出竞争已根治；嫌疑 MSAA 光栅化，antialias:false 实验反而使非纯色断言回归已证伪简单路径）——retries=2 为已声明的技术债缓解（根因正式立账 T1.14，非静默重试）**途中实战复现并修复 §3.3.3 阶段B 竞争**：UI rAF 逐出 memo → 新增 Raf.freezeCanvasRedraws 公共 API + 关键区冻结 + 帧稳定探针（run.json 留痕三要素）；C1 组件矩阵待 include 开关入 public API 后补 |
+| T1.9 | Playwright 全链路 + 基线 + 功能断言 | A1–C1 通过（本地真实 fixture）；**上游 PR 内用合成 trace 等价场景**；基线入库（合成 trace 基线） | T1.6, T1.7 | ✅ | commit pr1-timeline-image + ui/src/test/timeline_image.test.ts | 5/5 过 + 阶段B竞争实战修复（freeze+探针）；确定性残余→T1.14 retries=2 已声明；产物 out/ui/timeline_image_artifacts |
 | T1.10 | WebGL 读回专项（colorSpace 一致性 + 大图 toBlob） | 两条读回路径输出一致 | T1.6 | ⬜ | 测试 | §9 风险 4 |
-| T1.13 | 产物规范补齐：harvester 脚本（manual run 六件套自动生成）+ 保留策略清理 + latest 软链 | D.4 承诺全部兑现：六件套齐、清理生效 | T1.9 | ⬜ | 脚本 | v9.5 补登记（此前执行缺口） |
-| T1.14 | 确定性残余抖动根因（真机 GPU headless 间歇 diff；嫌疑 MSAA，antialias=false 实验证伪简单路径并致非纯色回归；替代假设：残余逐出窗口/纹理缓存） | 复现率量化（≥100 次采样）+ 根因定位；期间 spec 保持 retries=2（已声明的技术债，非静默掩盖） | T1.10 | ⛔ | 调查记录 | v9.5 正式立账；与 T1.10 合并跟进 |
-| T1.15 | track 渲染器 whenDataReady 覆盖率清单（系统性债务：所有自带 BufferedBounds/AsyncMemo 状态的 track 均需 queryBounds+whenDataReady 才能离屏正确出图；T1.4 只改了 slice/counter 两基类） | 盘点全部注册 track 类型 → 分类（已支持/待改造/离屏不可用）；每类至少一个 fixture 用例进 C1 矩阵 | T1.4 | ✅ | 清单文档 + 用例 | v9.6 立账 → **v9.16 扫描闭环**：tools/timeline-image/scan-tracks*.mjs 双层扫描——①默认视图：6 fixture 全部 track 特征盘点（noWarmup=0：树内全部非组叶子均具备 whenDataReady——slice/counter 两基类改造的继承覆盖面 + CpuFreqTrack 补齐后恰好覆盖 fixture 宇宙全部类型）+ 默认渲染逐 band 零空白；②深度：jank fixture 全部 1999 叶子分批渲染（500/批），**零空白**，低覆盖 287 条抽查全为稀疏数据源（battery_stats/clock snapshots/doze/wakelock 类）正常表现。产物 out/test-runs/2026-08-23-04-23-23-t1.15-scan。**边界**：扫描只覆盖本 fixture 宇宙的 track 类型；新插件类型接入时需重跑扫描（工具已入库） |
+| T1.13 | 产物规范补齐：harvester 脚本（manual run 六件套自动生成）+ 保留策略清理 + latest 软链 | D.4 承诺全部兑现：六件套齐、清理生效 | T1.9 | ⬜ | 脚本 | 六件套部分达成（runner 内置）；保留策略/latest 软链仍欠 |
+| T1.14 | 确定性残余抖动根因（真机 GPU headless 间歇 diff；嫌疑 MSAA，antialias=false 实验证伪简单路径并致非纯色回归；替代假设：残余逐出窗口/纹理缓存） | 复现率量化（≥100 次采样）+ 根因定位；期间 spec 保持 retries=2（已声明的技术债，非静默掩盖） | T1.10 | ⛔ | 调查记录 | ⛔ 立账未收口；证据 out/test-runs/20260823-overlay-immunity（A≠B 复现）；与 T1.10 合并跟进 |
+| T1.15 | track 渲染器 whenDataReady 覆盖率清单（系统性债务：所有自带 BufferedBounds/AsyncMemo 状态的 track 均需 queryBounds+whenDataReady 才能离屏正确出图；T1.4 只改了 slice/counter 两基类） | 盘点全部注册 track 类型 → 分类（已支持/待改造/离屏不可用）；每类至少一个 fixture 用例进 C1 矩阵 | T1.4 | ✅ | 清单文档 + 用例 | ✅ 双层扫描零空白（6 fixture + 1999 叶子）；产物 out/test-runs/*-t1.15-scan；新插件接入需重跑 |
 | T1.16 | workspace 时序竞争防护（traceInfo 就绪 ≠ defaultWorkspace 树建完；过早调用 renderTimelineImage 会报 no renderable tracks） | renderTimelineImage 在 workspace 空时等待（有限预算）或返回 WORKSPACE_NOT_READY warning，而非误报 missing | T1.7 | ✅ | 修复 + 用例 | v9.6 立账 → v9.18 闭环（双层）：API 侧等待 `!isLoadingTrace && workspace 有 track`（30s 预算，超时明确报错——比"有任意 track"更强，堵住半建树竞态：demo 实证 trackNames 曾在半建树上误报 TRACK_MISSING）；postMessage 侧等 trace 出现（60s）。M2 demo 两连跑零 flake |
 | T1.17 | native trace_processor 测试默认化（`trace_processor_shell -D` daemon + UI 自动协商；注意 daemon 有 preloaded trace 时 UI 会弹确认框，测试需空载 daemon） | 测试脚本默认 native：smartperfetto 14.86MB 加载 4.3s→0.9s；example 58MB 2.6s(WASM 3.3s)；脚本记录引擎证据（console "Opening trace using native accelerator"，注意勿误匹配启动期 ERR_CONNECTION_REFUSED 警告） | — | ✅ | daemon 启停 + bench 记录 | v9.7；UI 侧无需改动（USE_HTTP_RPC_IF_AVAILABLE 自动协商）；后续所有 manual run 默认带 native |
 | T1.18 | 组件宇宙盘点与覆盖物免疫验证（用户质询"是否最多 9 个组件、弹窗是否排除"触发） | 完整矩阵：9 静态布局 + 8 类动态组件（modal/toast/tooltip/hint/spinner/popup/选中态/搜索高亮），每类标注排除机制并有证据 | — | ✅ | 组件矩阵 + 免疫实验 | v9.8。**弹窗免疫已实证**（out/test-runs/20260823-overlay-immunity：注入 modal 后渲染与干净首拍逐字节相同 b985fc96/62267B）；DOM 层组件物理不可入图（离屏输出自合成 GL+2D canvas）；canvas 内 session 覆盖物 includeSessionOverlays:false 排除；perfStatsEnabled:false 排除统计小字。边界残留：checkerboard 加载占位在 per-track 超时软退出时可能入图（timedOutTracks warning 兜底，未单独实证）；track 组标题行（DOM sticky）不入图，名称列实现时以缩进层级补偿 |
-| T1.19 | webfont 时序：UI 字体是 woff2 + font-display:swap，离屏首渲染可能用 fallback 字形（破坏确定性与视觉一致） | renderOffscreenTimeline 开头 await document.fonts.ready | — | ✅ | commit | v9.10 修复（用户"还有哪些漏洞"质询触发）。测试环境字体恒就绪难以构造失败用例，以代码审查+原理为保证 |
-| T1.20 | GL context lost 未监听（webglcontextlost 事件；MAX_RENDERS_PER_CONTEXT=200 主动回收已覆盖主因，被动丢失无恢复路径） | 监听事件 → 立即重建共享表面 + warning 上报；复现场景难造（浏览器内存压力），可代码审查交付 | T1.6 | ⬜ | 修复 | v9.10 立账（低概率高影响） |
-| T1.21 | 确定性输入语义未文档化：workspace 状态（用户展开/折叠/pin/搜索）是隐式输入——显式 trackUris 不受影响，但默认收集与若干高度计算（isSummary&&expanded）读取实时状态，"同输入同输出"的"输入"须定义包含 workspace 状态 | API guarantee 节明确：显式 trackUris+timeSpan 下输出仅依赖这些参数；默认收集语义=调用瞬间的 workspace 快照（并文档警示） | — | ⬜ | 文档 | v9.10 立账（M2 postMessage 协议文档前必须落） |
-| T1.29 | **全量回归验证**（用户质询"官方测试流程是否全测过、有无死角"触发）：官方 UI 测试 = tsc（build 内置）+ vitest 全量 + eslint/format + Playwright 31 spec（`ui/run-integrationtests`，Linux CI 含像素基线）；此前只跑过 timeline_image 单 spec——**真死角** | 三步：(a) format-sources --check-only + eslint 全量零警告；(b) run-integrationtests --no-build 全量，fail 逐个归因（环境性[本地无像素基线/chrome channel]→豁免清单带证据；我们引入→修；存疑→stash 对照深挖）；改动公共路径（raf_scheduler/post_message_handler/css_constants/track_view/track_shell/counter/slice track）对应 spec 单列覆盖确认；(c) 归因矩阵+豁免清单归档 out/test-runs/&lt;ts&gt;-t1.29-full-regression/。**诚实声明**：mac 本地无法 100% 复刻 Linux CI（像素基线跨机 diff 官方已知）；本任务是消除"从未全量跑过"死角+显式化环境差异，完全等价需 T1.0 fork CI | T1.9 | 🔵 | 回归报告 | v9.19 立账（先经用户 review 计划再执行） |
-| T1.22 | manual run 脚本流程纪律：step4 截图撞 native tp preloaded 弹窗、step5 daemon 启动路径错（均手写脚本重复踩已记录的坑）→ T1.13 harvester helper 提升优先级：封装 daemon 启停/空载保证/弹窗 dismiss/workspace 等待/产物六件套，manual run 一律走 helper | 所有 manual run 产物出自 helper（坑清零）；T1.13 完成即闭环 | T1.13 | ⬜ | helper 脚本 | v9.10 立账 |
-| T1.23 | 默认参数大 trace 超护栏：默认全量收集（高数千 px）× 默认 dpr2 超 32M 像素上限直接抛错——"默认"开箱不可用 | 方案 A 自动降 dpr 重试（result 如实报告实际 dpr）或方案 B 错误信息引导 devicePixelRatio:1；owner 决策后实现 | T1.5 | ✅ | 修复 + 用例 | v9.11 立账 → v9.17 落地（方案 A）：negotiateDpr 纯函数（请求 dpr 溢出→降 1x；1x 仍溢出才抛），result.devicePixelRatio 如实报告有效值（公共 API 增字段）；两分支单测覆盖；G1 spec 不再需要 dpr1 绕过 |
-| T1.24 | 黄金场景矩阵制度化：G1 默认全量（已建：序列断言 vs UI DOM）、G2 用户 4-track pin+A2 窗（已有 A2 用例）、G3 大窗口 A3（已有）；交付纪律：给用户的 review 图只出自 G 矩阵产物（附 UI 参照并排），禁止临时手造参数演示图充当交付物 | G 矩阵全部有自动断言 + 产物规范（每场景 PNG+metadata+UI 参照）；后续新场景（M2 postMessage demo）先入矩阵再交付 | T1.9 | 🔵 | spec + 产物 | v9.11 起执行；G1 已落地（out/test-runs/20260823-g1-default-golden） |
-| T1.25 | 黄金场景注册表冻结 + runner 落地（tools/timeline-image/run-golden.mjs）：G-STD=用户标准工作集（pin RenderThread 置顶、cpu0-3 freq+sched、A2 窗、1800@dpr1——step2 用户认可参数冻结）；G-DEFAULT=零参数 API 语义（全量 174 track，UI 序）；runner 内置空 daemon 保证/弹窗 dismiss/workspace 等待/六件套产物 | 场景参数只改注册表（改前须用户确认）；所有交付图出自 runner；G-STD/G-DEFAULT 首跑产物已归档 | T1.13, T1.22, T1.24 | ✅ | runner + 产物 | v9.12。T1.22 闭环（弹窗/daemon 坑由 runner 制度性消除）；T1.13 六件套部分达成（保留策略清理/latest 软链仍欠） |
-| T1.26 | **期望与实现解耦**（用户结构性质询："改内部实现+外部脚本测 API，是否解耦？"）：调用方式本已外部黑盒（集成测试与 runner 均走公共 API），但期望不独立——实现 commit 常同步改测试期望，绿灯无法捕捉用户视角回归 | 基线冻结：baselines/&lt;场景&gt;.json 存硬期望（尺寸/warnings/全 track 序列）+ 参考像素 hash（T1.14 收口前为 advisory）；验证模式 mismatch 即 fail；更新基线须显式 --update-baseline 且独立 commit 说明理由；基线文件入 git 可 review | T1.25 | ✅ | 基线 + 机制 | v9.13。G-STD/G-DEFAULT 基线已建立并双验证通过（序列+像素 hash 双一致） |
-| T1.27 | 按名/tid 定位 track（用户用例 G-E1 实证：用户给出"RenderThread [4543]"而 API 只收 uri，runner 只能代查）：公共 API 增 trackNamePatterns 或 resolveTrack({name, tid}) 类参数 | API 支持人类语义定位；M3 trackNamePatterns 设计提前评估 | M3 | ✅ | API + 用例 | v9.14 立账 → v9.15 落地：`trackNames: [{name, tid?, pid?}]`，workspace 标题匹配（"<name> <tid>" 精确；裸名匹配等值或前缀），同名 headless 组优先于子 track（组展开即线程真实 track），布局按 uri 去重；未匹配 → TRACK_MISSING warning（warning 链路 offscreen→manager→result 打通）。顺序契约：解析结果追加于显式 trackUris 后，置顶由 pinTracks 负责 |
-| T1.28 | 宽高比规格（用户用例 G-E1 实证："4:3"需求 API 无对应参数；高度由 track 集合决定，runner 以两段渲染反推 widthPx=height×ratio 实现） | API 增 aspectRatio?: number（或 heightPx + widthPx 二选一约束）；owner 评估与 widthPx 的组合语义 | — | ✅ | API + 用例 | v9.14 立账 → v9.15 落地（owner 设计用户确认）：**widthPx 与 aspectRatio 互斥**（同一自由度：高度恒由 track 集合导出），都传报错、都不传默认 1920（默认下沉 renderer）；ratio 时 width=round(height×ratio) 布局后求解（无探测渲染）；dpr（清晰度，默认 2）与形状正交独立。G-E1 改用原生参数，冻结基线 913×685 与原生实现逐字节一致（交叉验证） |
+| T1.19 | webfont 时序：UI 字体是 woff2 + font-display:swap，离屏首渲染可能用 fallback 字形（破坏确定性与视觉一致） | renderOffscreenTimeline 开头 await document.fonts.ready | — | ✅ | commit | ✅ fonts.ready await（jsdom 守卫） |
+| T1.20 | GL context lost 未监听（webglcontextlost 事件；MAX_RENDERS_PER_CONTEXT=200 主动回收已覆盖主因，被动丢失无恢复路径） | 监听事件 → 立即重建共享表面 + warning 上报；复现场景难造（浏览器内存压力），可代码审查交付 | T1.6 | ⬜ | 修复 | 低概率高影响；200 次主动回收已覆盖主因 |
+| T1.21 | 确定性输入语义未文档化：workspace 状态（用户展开/折叠/pin/搜索）是隐式输入——显式 trackUris 不受影响，但默认收集与若干高度计算（isSummary&&expanded）读取实时状态，"同输入同输出"的"输入"须定义包含 workspace 状态 | API guarantee 节明确：显式 trackUris+timeSpan 下输出仅依赖这些参数；默认收集语义=调用瞬间的 workspace 快照（并文档警示） | — | ⬜ | 文档 | M2 协议文档前必须落（部分已入 §3.4 前置条件） |
+| T1.29 | **全量回归验证**（用户质询"官方测试流程是否全测过、有无死角"触发）：官方 UI 测试 = tsc（build 内置）+ vitest 全量 + eslint/format + Playwright 31 spec（`ui/run-integrationtests`，Linux CI 含像素基线）；此前只跑过 timeline_image 单 spec——**真死角** | 三步：(a) format-sources --check-only + eslint 全量零警告；(b) run-integrationtests --no-build 全量，fail 逐个归因（环境性[本地无像素基线/chrome channel]→豁免清单带证据；我们引入→修；存疑→stash 对照深挖）；改动公共路径（raf_scheduler/post_message_handler/css_constants/track_view/track_shell/counter/slice track）对应 spec 单列覆盖确认；(c) 归因矩阵+豁免清单归档 out/test-runs/&lt;ts&gt;-t1.29-full-regression/。**诚实声明**：mac 本地无法 100% 复刻 Linux CI（像素基线跨机 diff 官方已知）；本任务是消除"从未全量跑过"死角+显式化环境差异，完全等价需 T1.0 fork CI | T1.9 | 🔵 | 回归报告 | 🔵 计划已立（先 review 后执行）；三步方案见 D.5 08-23 条目 |
+| T1.22 | manual run 脚本流程纪律：step4 截图撞 native tp preloaded 弹窗、step5 daemon 启动路径错（均手写脚本重复踩已记录的坑）→ T1.13 harvester helper 提升优先级：封装 daemon 启停/空载保证/弹窗 dismiss/workspace 等待/产物六件套，manual run 一律走 helper | 所有 manual run 产物出自 helper（坑清零）；T1.13 完成即闭环 | T1.13 | ⬜ | helper 脚本 | ✅ 由 runner/demo 内置空 daemon+弹窗兜底制度性消除 |
+| T1.23 | 默认参数大 trace 超护栏：默认全量收集（高数千 px）× 默认 dpr2 超 32M 像素上限直接抛错——"默认"开箱不可用 | 方案 A 自动降 dpr 重试（result 如实报告实际 dpr）或方案 B 错误信息引导 devicePixelRatio:1；owner 决策后实现 | T1.5 | ✅ | 修复 + 用例 | ✅ negotiateDpr 纯函数 + result.devicePixelRatio |
+| T1.24 | 黄金场景矩阵制度化：G1 默认全量（已建：序列断言 vs UI DOM）、G2 用户 4-track pin+A2 窗（已有 A2 用例）、G3 大窗口 A3（已有）；交付纪律：给用户的 review 图只出自 G 矩阵产物（附 UI 参照并排），禁止临时手造参数演示图充当交付物 | G 矩阵全部有自动断言 + 产物规范（每场景 PNG+metadata+UI 参照）；后续新场景（M2 postMessage demo）先入矩阵再交付 | T1.9 | 🔵 | spec + 产物 | 🔵 制度执行中；G1 已落地（序列断言 vs UI DOM） |
+| T1.25 | 黄金场景注册表冻结 + runner 落地（tools/timeline-image/run-golden.mjs）：G-STD=用户标准工作集（pin RenderThread 置顶、cpu0-3 freq+sched、A2 窗、1800@dpr1——step2 用户认可参数冻结）；G-DEFAULT=零参数 API 语义（全量 174 track，UI 序）；runner 内置空 daemon 保证/弹窗 dismiss/workspace 等待/六件套产物 | 场景参数只改注册表（改前须用户确认）；所有交付图出自 runner；G-STD/G-DEFAULT 首跑产物已归档 | T1.13, T1.22, T1.24 | ✅ | runner + 产物 | ✅ 注册表 tools/timeline-image/run-golden.mjs；G-STD/G-DEFAULT 基线冻结 |
+| T1.26 | **期望与实现解耦**（用户结构性质询："改内部实现+外部脚本测 API，是否解耦？"）：调用方式本已外部黑盒（集成测试与 runner 均走公共 API），但期望不独立——实现 commit 常同步改测试期望，绿灯无法捕捉用户视角回归 | 基线冻结：baselines/&lt;场景&gt;.json 存硬期望（尺寸/warnings/全 track 序列）+ 参考像素 hash（T1.14 收口前为 advisory）；验证模式 mismatch 即 fail；更新基线须显式 --update-baseline 且独立 commit 说明理由；基线文件入 git 可 review | T1.25 | ✅ | 基线 + 机制 | ✅ baselines/<场景>.json 硬期望 + advisory 像素 hash；mismatch 即 fail |
+| T1.27 | 按名/tid 定位 track（用户用例 G-E1 实证：用户给出"RenderThread [4543]"而 API 只收 uri，runner 只能代查）：公共 API 增 trackNamePatterns 或 resolveTrack({name, tid}) 类参数 | API 支持人类语义定位；M3 trackNamePatterns 设计提前评估 | M3 | ✅ | API + 用例 | ✅ trackNames（headless 组优先/去重/TRACK_MISSING） |
+| T1.28 | 宽高比规格（用户用例 G-E1 实证："4:3"需求 API 无对应参数；高度由 track 集合决定，runner 以两段渲染反推 widthPx=height×ratio 实现） | API 增 aspectRatio?: number（或 heightPx + widthPx 二选一约束）；owner 评估与 widthPx 的组合语义 | — | ✅ | API + 用例 | ✅ widthPx/aspectRatio 互斥；ratio 布局后求解 |
 | T1.11 | locale 确定性验证（时间轴 label 格式化路径） | 确认/强制 root locale，跨机 diff 稳定 | T1.9 | ✅ | 源码核查记录 | 结论：**当前离屏输出（网格线，无刻度 label）locale 无关、确定性成立**；Timecode 核心是纯 toString/padStart。两处 `toLocaleString()` 隐患已定位并挂账：`time.ts` duration 格式化、`time_axis_panel.ts:90/165`（时间轴 label）——**includeTimeAxis 落地时（C1 组件矩阵）必须在该路径强制固定 locale**（en-US 或 raw string），已写入 D7 对策备注 |
 | T1.12 | metatrace 埋点接入（traceEventBegin/End，事件名按 §6.5 约定） | 导出的 metatrace 含 warmUp/barrier/draw/encode 分段时间线，与 result.perf 交叉验证一致 | T1.6, T1.7 | ✅ | commit pr1-timeline-image | §6.5；traceEvent API 首个消费者：事件 TimelineImage.warmUp/draw/e2e（round 入 args）；`TimelineImageResult.perf` 四段（load/draw/encode/elapsed）入 public API 并有 spec 断言；barrier 并入 warmUp 轮次计时 |
 
@@ -823,3 +828,18 @@ trace.pftrace
 | 正式 spec 自动产物（API 渲染 PNG） | `out/ui/timeline_image_artifacts/<时间戳>-<用例>.png`（Playwright 仅物化失败用例附件，spec 自行落盘，v9.5 增补） | 时间戳 + 用例名，逐次累积 | ❌ |
 
 运行目录结构件：`run.json`（用例 ID/trace fixture/git rev/GL 后端/dpr 等环境）、`assertions.json`（逐条断言结果，**失败必须含原因字段**，对齐 D.3 失败留痕）、`metadata.json`（`TimelineImageResult` 的 warnings/perf/trackBoxes 原样落盘，供 §6.4 趋势与 §8.5 看护消费）、`querylog.json`（§6.5：该次运行触发的全部 SQL 与耗时，来自 `engine.queryLog`）、`metatrace.pb`（可选，§6.5：问题复现时导出，标准 proto trace 可回载 UI）、`*.png`。保留策略：最近 50 次或 30 天、空间上限 2GB，超出自动清理最旧。**执行现状（v9.5 诚实登记）**：manual run 目录目前仅 run.json（+部分 metadata.json），assertions/querylog/png 由 T1.13 脚本化补齐；保留策略未实现，随 T1.13 交付。渲染服务的批量产物不进本仓库（走临时目录/对象存储，§8.3）。
+
+### D.5 执行日志（Execution Log）
+
+> 过程叙事的唯一归宿（倒序）。任务状态见 D.2；文档版本主题见附录 C。
+
+| 日期 | 主体 | 叙事与指针 |
+|---|---|---|
+| 08-23 | T1.29 计划 | 官方测试流程对照：tsc✅/vitest 全量 2568✅/eslint⚠️未单独跑/**Playwright 31 spec 只跑过 1**（真死角）/像素基线 Linux-only（本地目录空，mac 跨机 diff 官方已知）。三步方案：a) format+lint 零警告；b) run-integrationtests 全量 + fail 归因规则（环境性豁免带证据/引入即修/存疑 stash 对照）；c) 归因矩阵归档。待用户批准执行 |
+| 08-23 | M2 (T2.1-2.3, T1.16) | postMessage renderTimelineImage：挂起 60s 等 trace、并发 1+队列 32（最老溢出显式拒绝）、PNG ArrayBuffer 回传、错误同 id 通道；T1.16 双层（API 等 !isLoadingTrace&&tracks 30s——半建树竞态实证：trackNames 曾误报 TRACK_MISSING）。demo postmessage-demo.mjs ~8s 端到端两连稳（含 150s 硬超时兜底——曾捕获进程退出挂死）；协议文档入 embedding-api-reference.md。产物 out/test-runs/postmessage-demo |
+| 08-23 | 性能修复 | warm-up 串行最坏 N×60s 雪崩→并行化+后续轮 5s 上限（端到端 209ms/图）；分阶段计时证明加载仅 4.5s，"慢"的元凶是渲染内串行等待 |
+| 08-23 | B1/B2 修复 | 像素级 band 分析（逐 track 非背景覆盖率+颜色数）取代肉眼 review：B1 headless 容器零高度（/thread_7303→展开 state+slice）；B2 CpuFreqTrack 缺 whenDataReady（窄窗口数据 bounds 错位→数据点全在画布外；全量窗口能画纯属缓存命中）——按 counter_track 同构修复，T1.15 立账防类别性风险 |
+| 08-23 | 样式真值对齐 | 用户对比 UI 截图发现差异→读 DOM computed style 真值替换猜测常量（14px/300/透明背景/depth×8+3/Start:Duration 复刻）；契约定为 visual parity（残余=canvas vs DOM 文栅格化亚像素） |
+| 08-23 | 制度演进 | 逐轮质询驱动：17 类组件盘点+弹窗免疫实证（注入 modal 输出逐字节不变）→allowlist 两开关决策（preset 砍除）→黄金场景注册表+冻结基线（期望与实现解耦，实现 commit 不得顺手改期望）→验证脚本强制阶段计时+硬超时+daemon 内嵌 |
+| 08-23 | G-E1 用户用例 | 用户亲写用例（slice[95635..115701]/RenderThread 4543/4:3）：timecode 与 trace_processor 交叉验证自洽（domain 原点 3424607565230）；驱动 T1.27/T1.28 落地后切原生参数，基线逐字节一致 |
+| 08-23 | T1.15 扫描 | 双层（默认视图 6 fixture noWarmup=0 零空白；jank 1999 叶子分批零空白，低覆盖 287 条=稀疏数据源正常）。途中修扫描脚本自身 h/height 字段 bug——期望独立于实现的又一实证 |
