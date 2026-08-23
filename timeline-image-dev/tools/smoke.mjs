@@ -80,9 +80,10 @@ for (const f of FIXTURES) {
       for (const c of n.children) findThreads(c);
     };
     findThreads(window.ctx.defaultWorkspace.tracks);
+    // Browser-default order (freq group, sched group, ..., thread groups):
+    // no pinning — trackUris follow the workspace tree order.
     out.push(await shot({
       trackUris: uris.concat(threadGroups),
-      pinTracks: threadGroups,
       timeSpan: {start: spec.window[0], end: spec.window[1]},
       widthPx: 1600, devicePixelRatio: 1, perTrackTimeoutMs: 30000,
     }, 'tuned'));

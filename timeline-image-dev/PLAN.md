@@ -705,6 +705,7 @@ trace.pftrace
 | v9.18 | 08-23 | M2 里程碑：postMessage 入口 + T1.16 双层闭环 |
 | v9.19 | 08-23 | T1.29 全量回归计划立项（官方流程对照盘点） |
 | v9.20 | 08-23 | 文档结构治理：修订史/任务表瘦身、D.5 执行日志新增、设计区与实现同步 |
+| v9.25 | 08-23 | 用户 review 确认标注驱动截图"完全正确"后提两点：①**行分隔线根因定位**（track_shell.scss `__shell` 与 `__canvas` 各有 border-bottom 1px border-secondary——离屏只画了 shell 侧且用色 border）→ 补全宽行线+换色，视觉核验与用户截图一致；②**去 pin**：S2 冒烟改浏览器默认序（freq→sched→线程组；pinTracks 保留为 API 能力）——smoke 复跑 12/12，基线按制度显式重建（样式变更） |
 | v9.24 | 08-23 | 用户 review 冒烟截图发现 4 问题（default 超长/tuned 过小/cpu0-3 无出处/jank 知识未用）→ **人工审核门制度生效**；**API 默认语义变更（经批）**：零参数默认高度上限 2160px + TRUNCATED warning（显式 trackUris 不受限）；smoke 重设计（每 fixture 专属关键线程+窗口，全 CPU freq/sched，widthPx 1600）12/12 达标（首跑发现线程未置顶，修正 pin 语义后复跑）；G-DEFAULT 基线按批准语义显式重建（1800×2179/64t/TRUNCATED） |
 | v9.23 | 08-23 | **产物目录统一**（用户反馈"目录太多太乱"）：全部非代码产物归入 timeline-image-dev/（PLAN.md / tools/ 全部工具+基线 / results/ 全部结果+集成产物+LATEST 软链，gitignore）；路径迁移后黄金基线/冒烟/清理全链路验证通过；代码仍在源码树，协议文档留 docs/（上游位置），CI workflow 留 .github/（GitHub 位置） |
 | v9.22 | 08-23 | **T1.14 收口（根因非 MSAA）**：用户质疑原方案（量化噪声找容差）非正面 → 业界调研（playwright/perfetto 官方皆 threshold+maxDiffPixels 容差制；SwiftShader=确定性渲染业界标准；pixelmatch/SSIM=感知度量主流）→ 方案改为根治+契约对齐 → 实验链：SwiftShader 同样 2/20 抖动（证伪光栅化假设）→ 差异像素聚类定位单一 slice 标签区 → 真因 fixed-point maxRounds=3 截断 → 修复后双后端 20/20 字节全等，基线像素 hash 升格硬断言；附：原"100 次采样"方案废弃 |

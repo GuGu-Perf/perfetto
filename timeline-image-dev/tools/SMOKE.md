@@ -27,8 +27,8 @@
 | startup_light | .androidappdemo 8111 | slice[5597 MountEmulatedStorage]→slice[44997 doFrame] | 1600×826 | 19 | 无 | [startup_light-tuned.png](../results/REPORT-ASSETS/smoke/startup_light-tuned.png) |
 | flutter_scroll | 1.ui 10626 + 1.raster 10627 | slice[1364 requestNextVsync]→slice[6201 CALLBACK_ANIMATION] | 1600×672 | 20 | 无 | [flutter_scroll-tuned.png](../results/REPORT-ASSETS/smoke/flutter_scroll-tuned.png) |
 
-公共参数：全部 CPU 的 freq+sched（运行时收集）+ 用户标注线程 pin 置顶 + `widthPx: 1600`。
+公共参数：全部 CPU 的 freq+sched（运行时收集）+ 用户标注线程组（**按浏览器默认顺序，不 pin**：freq→sched→…→线程）+ `widthPx: 1600`；行分隔线全宽（含内容区，对齐 UI `__shell`/`__canvas` 的 border-bottom，颜色 border-secondary）。
 标注原文见 [../ANNOTATIONS.md](../ANNOTATIONS.md)。
 
 ## 结论
-- **12/12 通过**：S1 全部按默认语义截断（≤2160px + TRUNCATED）；S2 全部为用户人工标注窗口，标注线程置顶、零 warnings。
+- **12/12 通过**：S1 全部按默认语义截断；S2 全部为用户人工标注窗口，浏览器默认顺序、零 warnings；用户人工 review 确认截图正确（v9.25 前的 tuned 批次），本轮仅样式补齐（行线全宽）与去 pin。

@@ -1,6 +1,6 @@
 {
  "scenario": "G-STD",
  "fingerprint": "{\"width\":1800,\"height\":392,\"warnings\":[],\"tracks\":[[\"RenderThread 13585\",\"/process_885/thread_7303_state\",18,2,false],[\"RenderThread 13585\",\"/slice_301\",132,2,false],[\"CPU 0 Frequency\",\"/cpu_freq_cpu0\",25,1,false],[\"CPU 1 Frequency\",\"/cpu_freq_cpu1\",25,1,false],[\"CPU 2 Frequency\",\"/cpu_freq_cpu2\",25,1,false],[\"CPU 3 Frequency\",\"/cpu_freq_cpu3\",25,1,false],[\"CPU 0 Scheduling\",\"/sched_cpu0\",30,1,false],[\"CPU 1 Scheduling\",\"/sched_cpu1\",30,1,false],[\"CPU 2 Scheduling\",\"/sched_cpu2\",30,1,false],[\"CPU 3 Scheduling\",\"/sched_cpu3\",30,1,false]]}",
- "pngHash": "5a68a746",
+ "pngHash": "f6d277f8",
  "note": "sequence and pngHash are both hard expectations (byte determinism proven 20/20 on GPU and SwiftShader, T1.14 closed)"
 }

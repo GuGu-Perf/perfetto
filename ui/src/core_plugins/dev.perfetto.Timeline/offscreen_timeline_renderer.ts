@@ -48,6 +48,7 @@ import type {Renderer} from '../../base/renderer';
 import {
   COLOR_BACKGROUND,
   COLOR_BORDER,
+  COLOR_BORDER_SECONDARY,
   COLOR_TEXT,
   COLOR_TEXT_MUTED,
   COLOR_TRACK_SUMMARY_COLLAPSED,
@@ -530,7 +531,7 @@ export async function renderOffscreenTimeline(
     // Opaque backgrounds also clip any gridline overdraw into their strips.
     if (includeTrackShell) {
       drawGroupHeaderRows(d2Ctx, trackBoxes, cssWidth);
-      drawTrackShell(d2Ctx, trackBoxes, shellWidth);
+      drawTrackShell(d2Ctx, trackBoxes, shellWidth, cssWidth);
     }
     if (includeTimeAxis) {
       drawTimeAxis(d2Ctx, {
@@ -729,6 +730,7 @@ function drawTrackShell(
     expanded: boolean;
   }>,
   shellWidth: number,
+  cssWidth: number,
 ): void {
   ctx.save();
   // No shell background fill: the DOM shell is transparent over the page
@@ -749,8 +751,11 @@ function drawTrackShell(
       // 14px text on a 16px line, one pixel into the row (DOM layout).
       box.top + 13,
     );
-    ctx.fillStyle = COLOR_BORDER;
-    ctx.fillRect(0, box.top + box.height - 1, shellWidth, 1);
+    // Row separators span the full row: both the DOM shell cell and the
+    // canvas cell carry border-bottom (track_shell.scss __shell/__canvas),
+    // in --pf-color-border-secondary.
+    ctx.fillStyle = COLOR_BORDER_SECONDARY;
+    ctx.fillRect(0, box.top + box.height - 1, cssWidth, 1);
   }
   ctx.restore();
 }
