@@ -16,19 +16,19 @@
 | startup_light | 1200×2178 | 66 | TRUNCATED | [startup_light-default.png](../results/REPORT-ASSETS/smoke/startup_light-default.png) |
 | flutter_scroll | 1200×2144 | 63 | TRUNCATED | [flutter_scroll-default.png](../results/REPORT-ASSETS/smoke/flutter_scroll-default.png) |
 
-## S2 关键区间组（每份 trace 专属参数，依据见"窗口依据"列）
+## S2 关键区间组（**2026-08-23 用户人工标注**，经 trace_processor 交叉验证：slice ID ↔ timecode ↔ 线程精确一致）
 
-| Fixture | 关键线程（置顶） | 窗口依据 | 尺寸 | track | warnings | 截图 |
+| Fixture | 关键线程（置顶） | 窗口依据（用户标注的 slice 锚点） | 尺寸 | track | warnings | 截图 |
 |---|---|---|---|---|---|---|
 | example | RenderThread 4543 | 用户用例 G-E1（slice[95635..115701]） | 1600×685 | 20 | 无 | [example-tuned.png](../results/REPORT-ASSETS/smoke/example-tuned.png) |
-| jank_customer | RenderThread 13585 | A2 jank 簇（最差帧 62.7ms） | 1600×557 | 16 | 无 | [jank_customer-tuned.png](../results/REPORT-ASSETS/smoke/jank_customer-tuned.png) |
-| scroll_standard | RenderThread 7151 | 最长 slice 22.8ms ±500ms | 1600×480 | 17 | 无 | [scroll_standard-tuned.png](../results/REPORT-ASSETS/smoke/scroll_standard-tuned.png) |
-| startup_heavy | RenderThread 25600 | 最长 slice 1.34s ±500ms | 1600×504 | 18 | 无 | [startup_heavy-tuned.png](../results/REPORT-ASSETS/smoke/startup_heavy-tuned.png) |
-| startup_light | RenderThread 2131 | 最长 slice 1.05s ±500ms | 1600×612 | 18 | 无 | [startup_light-tuned.png](../results/REPORT-ASSETS/smoke/startup_light-tuned.png) |
-| flutter_scroll | 1.raster 10627 + 1.ui 10626 | flutter 线程模型 + 最长 slice ±500ms | 1600×672 | 20 | 无 | [flutter_scroll-tuned.png](../results/REPORT-ASSETS/smoke/flutter_scroll-tuned.png) |
+| jank_customer | rcustomscroller 13534 | slice[10372 doFrame]→slice[12343 doFrame] | 1600×719 | 16 | 无 | [jank_customer-tuned.png](../results/REPORT-ASSETS/smoke/jank_customer-tuned.png) |
+| scroll_standard | rcustomscroller 12887 | slice[497 ACTION_DOWN]→slice[4875 doFrame] | 1600×666 | 18 | 无 | [scroll_standard-tuned.png](../results/REPORT-ASSETS/smoke/scroll_standard-tuned.png) |
+| startup_heavy | unch.aosp.heavy 21307 | slice[5937 MountEmulatedStorage]→slice[138099 MQ_Chain] | 1600×736 | 19 | 无 | [startup_heavy-tuned.png](../results/REPORT-ASSETS/smoke/startup_heavy-tuned.png) |
+| startup_light | .androidappdemo 8111 | slice[5597 MountEmulatedStorage]→slice[44997 doFrame] | 1600×826 | 19 | 无 | [startup_light-tuned.png](../results/REPORT-ASSETS/smoke/startup_light-tuned.png) |
+| flutter_scroll | 1.ui 10626 + 1.raster 10627 | slice[1364 requestNextVsync]→slice[6201 CALLBACK_ANIMATION] | 1600×672 | 20 | 无 | [flutter_scroll-tuned.png](../results/REPORT-ASSETS/smoke/flutter_scroll-tuned.png) |
 
-公共参数：全部 CPU 的 freq+sched（运行时收集实际数量，非人工子集）+ 关键线程 pin 置顶 + `widthPx: 1600`。
+公共参数：全部 CPU 的 freq+sched（运行时收集）+ 用户标注线程 pin 置顶 + `widthPx: 1600`。
+标注原文见 [../ANNOTATIONS.md](../ANNOTATIONS.md)。
 
 ## 结论
-- **12/12 通过**：S1 全部按新默认语义截断（≤2160px + TRUNCATED）；S2 关键线程全部置顶、专属窗口、零 warnings。
-- 本轮修正确认：S2 首跑线程未置顶（trackNames 是追加语义）→ 改为解析线程 uri 后 pinTracks 置顶，复跑达标。
+- **12/12 通过**：S1 全部按默认语义截断（≤2160px + TRUNCATED）；S2 全部为用户人工标注窗口，标注线程置顶、零 warnings。

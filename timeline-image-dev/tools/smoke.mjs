@@ -12,14 +12,16 @@ rmSync(OUT, {recursive: true, force: true});
 import {mkdirSync} from 'fs';
 mkdirSync(OUT, {recursive: true});
 
-// User-approved table: per-fixture key thread + window (see SMOKE.md for rationale).
+// User-annotated table (2026-08-23, cross-verified against trace_processor:
+// slice IDs resolve to exactly the user's UI timecodes; thread names match).
+// Any change requires user review (PLAN D.0).
 const FIXTURES = [
   {file: 'example_android_trace.pftrace', tag: 'example', thread: {name: 'RenderThread', tid: 4543}, window: ['3428202643641', '3428410622726'], basis: 'user case G-E1 (slice[95635..115701])'},
-  {file: 'smartperfetto_android_scroll_jank_customer.pftrace', tag: 'jank_customer', thread: {name: 'RenderThread', tid: 13585}, window: ['506734750000000', '506736000000000'], basis: 'A2 jank cluster (worst frame 62.7ms)'},
-  {file: 'smartperfetto_android_scroll_standard.pftrace', tag: 'scroll_standard', thread: {name: 'RenderThread', tid: 7151}, window: ['271814424593780', '271815424593780'], basis: 'longest slice 22.8ms ±500ms'},
-  {file: 'smartperfetto_android_startup_heavy.pftrace', tag: 'startup_heavy', thread: {name: 'RenderThread', tid: 25600}, window: ['564166286132658', '564167286132658'], basis: 'longest slice 1.34s ±500ms'},
-  {file: 'smartperfetto_android_startup_light.pftrace', tag: 'startup_light', thread: {name: 'RenderThread', tid: 2131}, window: ['40920750378802', '40921750378802'], basis: 'longest slice 1.05s ±500ms'},
-  {file: 'smartperfetto_flutter_scroll_surface_view.pftrace', tag: 'flutter_scroll', thread: {name: '1.raster', tid: 10627}, extraThread: {name: '1.ui', tid: 10626}, window: ['272267580552201', '272268580552201'], basis: 'flutter raster/ui threads, longest slice ±500ms'},
+  {file: 'smartperfetto_android_scroll_jank_customer.pftrace', tag: 'jank_customer', thread: {name: 'rcustomscroller', tid: 13534}, window: ['506731875782822', '506731991134280'], basis: 'user annotation: slice[10372 doFrame]..slice[12343 doFrame]'},
+  {file: 'smartperfetto_android_scroll_standard.pftrace', tag: 'scroll_standard', thread: {name: 'rcustomscroller', tid: 12887}, window: ['271813471995031', '271813624221124'], basis: 'user annotation: slice[497 ACTION_DOWN]..slice[4875 doFrame]'},
+  {file: 'smartperfetto_android_startup_heavy.pftrace', tag: 'startup_heavy', thread: {name: 'unch.aosp.heavy', tid: 21307}, window: ['564166676119845', '564168474168647'], basis: 'user annotation: slice[5937 MountEmulatedStorage]..slice[138099 MQ_Chain]'},
+  {file: 'smartperfetto_android_startup_light.pftrace', tag: 'startup_light', thread: {name: '.androidappdemo', tid: 8111}, window: ['40919888981177', '40920274311663'], basis: 'user annotation: slice[5597 MountEmulatedStorage]..slice[44997 doFrame]'},
+  {file: 'smartperfetto_flutter_scroll_surface_view.pftrace', tag: 'flutter_scroll', thread: {name: '1.ui', tid: 10626}, extraThread: {name: '1.raster', tid: 10627}, window: ['272267325622826', '272267492101733'], basis: 'user annotation: slice[1364 requestNextVsync]..slice[6201 CALLBACK_ANIMATION]; both threads'},
 ];
 const rows = [];
 for (const f of FIXTURES) {
