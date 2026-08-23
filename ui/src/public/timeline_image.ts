@@ -83,7 +83,6 @@ export interface TimelineImageOptions {
 
 /** Warning kinds reported on a completed TimelineImageResult. */
 export type TimelineImageWarning =
-  | 'TIMELINE_UNAVAILABLE'
   | 'TIMEOUT'
   // The zero-config default composition was truncated at the default
   // height cap (2160 CSS px); request explicit trackUris for everything.
@@ -122,7 +121,7 @@ export interface TimelineImageResult {
  * The implementation lives in core but the actual rendering is contributed by
  * the timeline plugin at trace-load time (registration inversion, mirroring
  * MinimapManager). If no renderer is registered (timeline plugin absent),
- * rendering fails with a TIMELINE_UNAVAILABLE warning.
+ * rendering rejects with an error.
  */
 export interface TimelineImageManager {
   renderTimelineImage(opts: TimelineImageOptions): Promise<TimelineImageResult>;

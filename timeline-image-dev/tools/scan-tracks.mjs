@@ -89,7 +89,7 @@ for (const fixture of FIXTURES) {
         }
       }
       return {
-        uri: b.uri, name: b.name, h: b.height, group: !!b.isGroupHeader,
+        uri: b.uri, name: b.name, h: b.height,
         hasWhenDataReady: f.hasWhenDataReady ?? null,
         hasRenderer: f.hasRenderer ?? null,
         covPct: +(100 * nonBg / Math.max(total, 1)).toFixed(1),

@@ -48,8 +48,8 @@ back-to-back and both succeed.
 
 ## Step 2: Pick the tracks and the time span
 
-A default snapshot of everything is rarely what a report needs. Selection is
-inclusion-only, by workspace URI:
+A picture of everything is rarely what a report needs. Selection is
+inclusion-only and explicit, by workspace URI:
 
 - `trackUris`: exact workspace URIs. **The list order is the render order,
   top to bottom** — putting a URI first is how you pin it to the top.
@@ -142,5 +142,5 @@ metadata: dimensions, effective `devicePixelRatio`, per-track bounding boxes
 | `TRUNCATED` warning | `heightPx` is smaller than the track content; the content was clipped. Drop `heightPx` or enlarge it. |
 | Render error `trackUris is required` | Selection is explicit — pass `trackUris` (discover URIs with `listTracks`). |
 | Render error `unknown track uris` | A URI in `trackUris` matched nothing in the workspace. Check the URI (ids come from trace_processor tables). |
-| `TIMELINE_UNAVAILABLE` warning | The timeline plugin did not register a renderer (no trace loaded, or load failed). |
+| Render error `no timeline renderer registered` | The timeline plugin did not register a renderer (no trace loaded, or load failed). |
 | `error: 'render queue full'` | More than 32 requests queued while one was running. Render less concurrently. |
