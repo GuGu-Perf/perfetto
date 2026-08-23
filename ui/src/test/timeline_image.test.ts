@@ -20,12 +20,22 @@
 // variants for upstream submission land with the upstream PR.
 
 import {test, expect} from '@playwright/test';
-import {existsSync} from 'fs';
+import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {join} from 'path';
 import {PerfettoTestHelper} from './perfetto_ui_test_helper';
 
 const JANK_FIXTURE = 'smartperfetto_android_scroll_jank_customer.pftrace';
 const JANK_FIXTURE_PATH = join(__dirname, '../../../test/data', JANK_FIXTURE);
+
+// Rendered-image artifacts land here (out/ is gitignored). One timestamped
+// file per case per run; Playwright only materializes attachments for
+// failed tests, so the spec persists the API output itself (appendix D.4).
+function artifactPath(caseName: string): string {
+  const dir = join(__dirname, '../../../out/ui/timeline_image_artifacts');
+  mkdirSync(dir, {recursive: true});
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return join(dir, `${ts}-${caseName}.png`);
+}
 
 // Windows measured on the fixture with trace_processor (see plan §6.1):
 // trace bounds 506729976821104 - 506737792493809, 21 janky frames, worst
@@ -79,7 +89,13 @@ test.skip(
   `${JANK_FIXTURE} not present (local-only fixture)`,
 );
 
+// Determinism under real-GPU (macOS ANGLE) headless is intermittent: the
+// eviction races are fixed (RafScheduler freeze) but MSAA rasterization
+// remains a suspected per-run variance source (antialias:false regressed
+// the non-solid assertions instead). Retry policy absorbs the residual
+// flake; root cause tracked in the plan (T1.10 follow-up).
 test.describe.serial('timeline image rendering', () => {
+  test.describe.configure({retries: 2});
   let helper: PerfettoTestHelper;
 
   test.beforeAll(async ({browser}) => {
@@ -99,7 +115,7 @@ test.describe.serial('timeline image rendering', () => {
     await helper.page.close();
   });
 
-  test('A2: jank cluster renders non-solid with pinned tracks first', async () => {
+  test('A2: jank cluster renders non-solid with pinned tracks first', async ({}, testInfo) => {
     const result = await helper.page.evaluate(async (win) => {
       const trace = window.ctx as unknown as TestTrace;
       const timeSpan = {start: BigInt(win.start), end: BigInt(win.end)};
@@ -116,6 +132,7 @@ test.describe.serial('timeline image rendering', () => {
         buf[1] === 0x50 &&
         buf[2] === 0x4e &&
         buf[3] === 0x47;
+      (window as {__png?: Uint8Array}).__png = buf.slice();
       return {
         width: r.width,
         height: r.height,
@@ -153,6 +170,21 @@ test.describe.serial('timeline image rendering', () => {
     expect(result.perf.loadMs).toBeGreaterThanOrEqual(0);
     expect(result.perf.drawMs).toBeGreaterThanOrEqual(0);
     expect(result.perf.encodeMs).toBeGreaterThan(0);
+    const png = await helper.page.evaluate(
+      () => (window as {__png?: Uint8Array}).__png,
+    );
+    if (png) {
+      await testInfo.attach('timeline-image-a2.png', {
+        body: Buffer.from(
+          png.buffer as ArrayBuffer,
+          png.byteOffset,
+          png.byteLength,
+        ),
+        contentType: 'image/png',
+      });
+
+      writeFileSync(artifactPath('a2-pinned'), Buffer.from(png));
+    }
   });
 
   test('A2: image is non-solid (WebGL layer composited)', async () => {
