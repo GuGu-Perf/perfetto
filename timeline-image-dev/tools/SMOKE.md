@@ -4,6 +4,10 @@
 > 命令：[smoke.mjs](smoke.mjs)（数据 [smoke.json](../results/REPORT-ASSETS/smoke/smoke.json)）
 > **参数变更须先经人工审核**（PLAN D.0 审核门）。
 
+## 复跑登记（ADR-17 参数面迁移后 · 2026-08-23 23:13 · commit eeab7412f4）
+
+trackNames/pinTracks 删除、trackUris-only 迁移后的全量复跑。**结果与下方两表首跑逐项一致**（尺寸 / track 数 / warnings / 头部顺序全同；smoke.json 由确定性输出覆盖，数值零漂移）——S2 的"线程组按浏览器默认顺序"在新 API 下由 `trackUris: uris.concat(threadGroups)`（页内运行时发现线程组 uri）表达，无 pin 参与。配套端到端：postmessage-demo.mjs（宿主页 → iframe → PNG 真实协议链，uri-only 参数）7.3s 出图 1200×227 / 4 track / warnings 空，产物 `results/postmessage-demo/postmessage-shot.png`。结论：迁移零行为漂移，冒烟通过。
+
 ## S1 零参数默认 `renderTimelineImage({widthPx: 1200, devicePixelRatio: 1})`
 语义（本轮经用户批准）：默认全部可见 track，**高度上限 2160px**，超出截断 + `TRUNCATED` warning（全量需显式 trackUris）。
 
