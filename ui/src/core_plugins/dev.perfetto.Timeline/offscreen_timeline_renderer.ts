@@ -290,7 +290,7 @@ export async function renderOffscreenTimeline(
   // before they are ready would use fallback glyphs and differ between
   // renders, breaking determinism (and visual parity with the live UI).
   // jsdom has no FontFaceSet; guard for test environments.
-  if (typeof document !== 'undefined' && document.fonts) {
+  if (typeof document !== 'undefined' && document.fonts !== undefined) {
     await document.fonts.ready;
   }
 
@@ -416,13 +416,9 @@ export async function renderOffscreenTimeline(
       // Round 0 gets the full per-track budget; later rounds only wait for
       // data-dependent second-order queries to settle, which are cheap.
       const budget = rounds === 0 ? perTrackTimeoutMs : SECOND_ROUND_BUDGET_MS;
-      await traceEvent(
-        'TimelineImage.warmUp',
-        () => warmUp(budget),
-        {
-          args: {round: String(rounds)},
-        },
-      );
+      await traceEvent('TimelineImage.warmUp', () => warmUp(budget), {
+        args: {round: String(rounds)},
+      });
       loadMs += performance.now() - loadStart;
       const drawStart = performance.now();
       traceEvent('TimelineImage.draw', () => draw(), {
@@ -709,11 +705,11 @@ function drawTrackShell(
   ctx.textBaseline = 'alphabetic';
   for (const box of boxes) {
     if (box.height <= 0) continue;
-    const x =
-      Math.max(0, box.depth) * SHELL_INDENT_PX + SHELL_TITLE_OFFSET_PX;
-    ctx.fillStyle = box.isGroupHeader && box.expanded
-      ? COLOR_TRACK_SUMMARY_EXPANDED_TEXT
-      : COLOR_TEXT;
+    const x = Math.max(0, box.depth) * SHELL_INDENT_PX + SHELL_TITLE_OFFSET_PX;
+    ctx.fillStyle =
+      box.isGroupHeader && box.expanded
+        ? COLOR_TRACK_SUMMARY_EXPANDED_TEXT
+        : COLOR_TEXT;
     ctx.fillText(
       clipText(ctx, box.name, shellWidth - 4 - x),
       x,

@@ -106,7 +106,8 @@ test.describe.serial('timeline image rendering', () => {
     // openTraceFile's idle wait can fire before the trace object is exposed;
     // wait for the bookmarklet API's trace explicitly.
     await page.waitForFunction(
-      () => !!(window as {ctx?: {traceInfo?: unknown}}).ctx?.traceInfo,
+      () =>
+        (window as {ctx?: {traceInfo?: unknown}}).ctx?.traceInfo !== undefined,
       undefined,
       {timeout: 60_000},
     );
@@ -278,7 +279,7 @@ test.describe.serial('timeline image rendering', () => {
       const dpr = canvas.width / r.width;
       const bandColors = new Set<string>();
       const box = r.trackBoxes[0];
-      if (box) {
+      if (box !== undefined) {
         const y0 = Math.floor((box.top + box.height / 2) * dpr);
         for (let x = 0; x < Math.floor(canvas.width * 0.05); x += 2) {
           const i = (y0 * canvas.width + x) * 4;
@@ -327,17 +328,16 @@ test.describe.serial('timeline image rendering', () => {
         widthPx: 1200,
         perTrackTimeoutMs: 20_000,
       };
-      const withDecorations = await trace.timelineImage.renderTimelineImage(
-        common,
-      );
+      const withDecorations =
+        await trace.timelineImage.renderTimelineImage(common);
       const bare = await trace.timelineImage.renderTimelineImage({
         ...common,
         includeTrackShell: false,
         includeTimeAxis: false,
       });
-      const sampleRegion = async (r: Awaited<
-        ReturnType<typeof trace.timelineImage.renderTimelineImage>
-      >) => {
+      const sampleRegion = async (
+        r: Awaited<ReturnType<typeof trace.timelineImage.renderTimelineImage>>,
+      ) => {
         const bmp = await createImageBitmap(r.blob);
         const canvas = document.createElement('canvas');
         canvas.width = bmp.width;
@@ -351,7 +351,7 @@ test.describe.serial('timeline image rendering', () => {
           for (let y = Math.floor(y0 * dpr); y < Math.ceil(y1 * dpr); y++) {
             for (let x = Math.floor(x0 * dpr); x < Math.ceil(x1 * dpr); x++) {
               const i = (y * canvas.width + x) * 4;
-              colors.add(`${d[i]},${d[i+1]},${d[i+2]}`);
+              colors.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
             }
           }
           const size = colors.size;
@@ -367,7 +367,12 @@ test.describe.serial('timeline image rendering', () => {
         trackDepth: firstBox?.depth,
         // Shell column strip (left of the track band) must contain text
         // pixels, i.e. more than a flat background color.
-        shellColors: sample(0, firstBox!.top, 240, firstBox!.top + firstBox!.height),
+        shellColors: sample(
+          0,
+          firstBox!.top,
+          240,
+          firstBox!.top + firstBox!.height,
+        ),
         // Time axis row must contain tick/label pixels.
         axisColors: sample(250, 0, 1200, 22),
       };

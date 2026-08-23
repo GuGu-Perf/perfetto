@@ -408,10 +408,7 @@ export class CpuFreqTrack implements TrackRenderer {
   private dataSlotOptions(
     tables: MipmapTables,
     bounds: {start: time; end: time; resolution: duration},
-  ): AsyncMemoOptions<
-    Data,
-    {start: time; end: time; resolution: duration}
-  > {
+  ): AsyncMemoOptions<Data, {start: time; end: time; resolution: duration}> {
     return {
       key: {
         start: bounds.start,

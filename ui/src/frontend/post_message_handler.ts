@@ -245,7 +245,8 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     const windowSource = messageEvent.source as Window;
     // Reply to the origin when known; COOP-isolated embedders see 'null'
     // and require '*' (same trade-off as PONG, plus PNG payload).
-    const targetOrigin = messageEvent.origin === 'null' ? '*' : messageEvent.origin;
+    const targetOrigin =
+      messageEvent.origin === 'null' ? '*' : messageEvent.origin;
     handleRenderTimelineImage(messageEvent.data.perfetto, (payload) => {
       windowSource.postMessage({perfetto: payload}, targetOrigin);
     });

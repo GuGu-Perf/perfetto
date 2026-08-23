@@ -111,8 +111,7 @@ async function renderTimelineImageAdapter(
   // isLoadingTrace stays true until loadTrace() resolves, which happens
   // only after every plugin's onTraceLoad has built its tracks: waiting on
   // both closes the partial-workspace race (plan T1.16).
-  const ready = () =>
-    !AppImpl.instance.isLoadingTrace && workspaceHasTracks();
+  const ready = () => !AppImpl.instance.isLoadingTrace && workspaceHasTracks();
   const waitDeadline = performance.now() + 30_000;
   while (!ready() && performance.now() < waitDeadline) {
     await new Promise((r) => setTimeout(r, 200));
@@ -199,13 +198,12 @@ function resolveTrackNames(
   for (const sel of selectors) {
     const id = sel.tid ?? sel.pid;
     const matches = titles.filter(({name}) =>
-      id === undefined ? name === sel.name || name.startsWith(`${sel.name} `)
-      : name === `${sel.name} ${id}`,
+      id === undefined
+        ? name === sel.name || name.startsWith(`${sel.name} `)
+        : name === `${sel.name} ${id}`,
     );
     if (matches.length === 0) {
-      unmatchedNames.push(
-        id === undefined ? sel.name : `${sel.name} [${id}]`,
-      );
+      unmatchedNames.push(id === undefined ? sel.name : `${sel.name} [${id}]`);
     } else {
       // A thread group (headless, e.g. "RenderThread 4543") and its child
       // tracks share the same title; prefer the group node — the renderer
