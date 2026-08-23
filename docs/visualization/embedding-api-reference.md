@@ -87,6 +87,61 @@ The handler retries internally (roughly 20 times at 200ms intervals) until the
 trace is ready, so this message can be posted shortly after the trace without
 waiting for an explicit "loaded" signal.
 
+## Render timeline image
+
+Renders the timeline (selected tracks, time span, decorations) offscreen and
+returns the PNG bytes:
+
+```js
+const reqId = 'shot-1';
+iframe.contentWindow.postMessage(
+    {
+      perfetto: {
+        action: 'renderTimelineImage',
+        id: reqId,
+        options: {
+          trackNames: [{name: 'RenderThread', tid: 4543}],
+          trackUris: ['/cpu_freq_cpu0', '/sched_cpu0'],
+          timeSpan: {start: '3428202643641', end: '3428410622726'},
+          widthPx: 1200,           // or aspectRatio (mutually exclusive)
+          devicePixelRatio: 1,
+        },
+      },
+    },
+    '*');
+
+window.addEventListener('message', (ev) => {
+  const d = ev.data?.perfetto;
+  if (d?.action === 'renderTimelineImageResult' && d.id === reqId) {
+    if (d.error) { /* render failed: d.error */ return; }
+    const pngBytes = new Uint8Array(d.png);   // ArrayBuffer
+    const meta = d.result;  // {width, height, devicePixelRatio, warnings,
+                            //  trackBoxes, perf}
+  }
+});
+```
+
+| Field      | Type     | Required | Meaning                                                       |
+| ---------- | -------- | -------- | ------------------------------------------------------------- |
+| `action`   | `string` | Yes      | Must be `'renderTimelineImage'`.                              |
+| `id`       | `string` | Yes      | Caller-correlation id, echoed on the result message.          |
+| `options`  | `object` | No       | `TimelineImageOptions` as JSON (see the TypeScript types). `timeSpan` values are strings. |
+
+Semantics:
+
+- **Held until the trace is loaded**: requests posted back-to-back with the
+  trace are queued internally (up to 60s), so no "loaded" handshake is
+  needed. Rendering itself additionally waits for all trace plugins to
+  finish building the workspace (up to 30s).
+- **Bounded queue**: one render runs at a time; up to 32 requests queue. The
+  oldest request is rejected (`error: 'render queue full'`) rather than
+  silently dropped.
+- **Determinism**: the output contains only timeline content (track shell
+  names, time axis, track data); no DOM chrome, interaction state or
+  overlays ever appear in the image.
+- The result message is posted to `event.origin` when known (`'*'` under
+  cross-origin isolation).
+
 ## String commands
 
 The handler understands these string messages:

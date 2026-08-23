@@ -70,6 +70,29 @@ interface PostedScrollToRange {
   viewPercentage?: number;
 }
 
+// Render a timeline image (see Trace#timelineImage#renderTimelineImage).
+// Requests are queued (bounded) and held until a trace is loaded, so an
+// embedder can post the trace and this request back-to-back.
+interface PostedRenderTimelineImage {
+  action: 'renderTimelineImage';
+  // Caller-correlation id, echoed on the result message.
+  id: string;
+  // TimelineImageOptions as JSON (timeSpan values as strings).
+  options?: Record<string, unknown>;
+}
+
+interface PostedRenderTimelineImageWrapped {
+  perfetto: PostedRenderTimelineImage;
+}
+
+// One render at a time; further requests wait in a bounded queue.
+const RENDER_QUEUE_CAP = 32;
+let renderInFlight = false;
+const renderQueue: {
+  req: PostedRenderTimelineImage;
+  reply: (payload: Record<string, unknown>) => void;
+}[] = [];
+
 // Returns whether incoming traces should be opened automatically or should
 // instead require a user interaction.
 export function isTrustedOrigin(origin: string): boolean {
@@ -215,6 +238,17 @@ export function postMessageHandler(messageEvent: MessageEvent) {
 
   if (messageEvent.data === 'RELOAD-CSS-CONSTANTS') {
     initCssConstants();
+    return;
+  }
+
+  if (isPostedRenderTimelineImage(messageEvent.data)) {
+    const windowSource = messageEvent.source as Window;
+    // Reply to the origin when known; COOP-isolated embedders see 'null'
+    // and require '*' (same trade-off as PONG, plus PNG payload).
+    const targetOrigin = messageEvent.origin === 'null' ? '*' : messageEvent.origin;
+    handleRenderTimelineImage(messageEvent.data.perfetto, (payload) => {
+      windowSource.postMessage({perfetto: payload}, targetOrigin);
+    });
     return;
   }
 
@@ -371,6 +405,94 @@ async function scrollToTimeRange(
       return;
     }
     setTimeout(scrollToTimeRange, 200, postedScrollToRange, maxAttempts + 1);
+  }
+}
+
+function isPostedRenderTimelineImage(
+  obj: unknown,
+): obj is PostedRenderTimelineImageWrapped {
+  const wrapped = obj as PostedRenderTimelineImageWrapped;
+  return (
+    wrapped.perfetto?.action === 'renderTimelineImage' &&
+    typeof wrapped.perfetto.id === 'string'
+  );
+}
+
+// Bound-concurrency render scheduler: one render in flight, up to 32
+// queued; the oldest overflow request is rejected, not silently dropped.
+function handleRenderTimelineImage(
+  req: PostedRenderTimelineImage,
+  reply: (payload: Record<string, unknown>) => void,
+): void {
+  if (renderInFlight) {
+    if (renderQueue.length >= RENDER_QUEUE_CAP) {
+      const rejected = renderQueue.shift()!;
+      rejected.req = req;
+      rejected.reply({
+        action: 'renderTimelineImageResult',
+        id: rejected.req.id,
+        error: 'render queue full (32 pending requests)',
+      });
+      renderQueue.push(rejected);
+      return;
+    }
+    renderQueue.push({req, reply});
+    return;
+  }
+  renderInFlight = true;
+  runRenderTimelineImage(req, reply).finally(() => {
+    renderInFlight = false;
+    const next = renderQueue.shift();
+    if (next) handleRenderTimelineImage(next.req, next.reply);
+  });
+}
+
+async function runRenderTimelineImage(
+  req: PostedRenderTimelineImage,
+  reply: (payload: Record<string, unknown>) => void,
+): Promise<void> {
+  try {
+    // Hold the request until a trace is loaded: embedders post the trace
+    // and this request back-to-back, the queue bridges the load delay.
+    const deadline = performance.now() + 60_000;
+    let trace = AppImpl.instance.trace;
+    while (trace === undefined && performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      trace = AppImpl.instance.trace;
+    }
+    if (trace === undefined) {
+      reply({
+        action: 'renderTimelineImageResult',
+        id: req.id,
+        error: 'no trace loaded within 60s of the render request',
+      });
+      return;
+    }
+    const r = await trace.timelineImage.renderTimelineImage(
+      req.options as Parameters<
+        typeof trace.timelineImage.renderTimelineImage
+      >[0],
+    );
+    const png = await r.blob.arrayBuffer();
+    reply({
+      action: 'renderTimelineImageResult',
+      id: req.id,
+      png,
+      result: {
+        width: r.width,
+        height: r.height,
+        devicePixelRatio: r.devicePixelRatio,
+        warnings: r.warnings,
+        trackBoxes: r.trackBoxes,
+        perf: r.perf,
+      },
+    });
+  } catch (e) {
+    reply({
+      action: 'renderTimelineImageResult',
+      id: req.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 

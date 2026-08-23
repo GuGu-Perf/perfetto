@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 import z from 'zod';
-import type {AppImpl} from '../../core/app_impl';
+import {AppImpl} from '../../core/app_impl';
 import type {TraceImpl} from '../../core/trace_impl';
 import type {Flag} from '../../public/feature_flag';
 import type {PerfettoPlugin} from '../../public/plugin';
@@ -96,6 +96,34 @@ async function renderTimelineImageAdapter(
   // Explicit trackUris keeps the flat-URI semantics (headless URIs expand
   // to their leaf descendants). trackNames resolve against the workspace
   // and merge into trackUris.
+  // A trace can be loaded (traceInfo available) while plugins are still
+  // building the workspace; rendering then would mis-report every URI as
+  // missing. Wait briefly for the first tracks to appear (plan T1.16).
+  const workspaceHasTracks = () => {
+    let any = false;
+    const visit = (n: TrackNode) => {
+      if (n.uri !== undefined || n.children.length > 0) any = true;
+      for (const c of n.children) visit(c);
+    };
+    visit(trace.defaultWorkspace.tracks);
+    return any;
+  };
+  // isLoadingTrace stays true until loadTrace() resolves, which happens
+  // only after every plugin's onTraceLoad has built its tracks: waiting on
+  // both closes the partial-workspace race (plan T1.16).
+  const ready = () =>
+    !AppImpl.instance.isLoadingTrace && workspaceHasTracks();
+  const waitDeadline = performance.now() + 30_000;
+  while (!ready() && performance.now() < waitDeadline) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!ready()) {
+    throw new Error(
+      'renderTimelineImage: trace/workspace not ready after 30s ' +
+        '(still loading or no tracks) — retry once the trace is loaded',
+    );
+  }
+
   const {resolvedNameUris, unmatchedNames} = resolveTrackNames(
     trace,
     opts.trackNames ?? [],
