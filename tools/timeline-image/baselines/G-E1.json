@@ -1,6 +1,6 @@
 {
  "scenario": "G-E1",
  "fingerprint": "{\"width\":913,\"height\":685,\"warnings\":[],\"tracks\":[[\"RenderThread 4543\",\"/process_12/thread_75_state\",18,2,false],[\"RenderThread 4543\",\"/slice_321\",150,2,false],[\"CPU 0 Frequency\",\"/cpu_freq_cpu0\",25,1,false],[\"CPU 1 Frequency\",\"/cpu_freq_cpu1\",25,1,false],[\"CPU 2 Frequency\",\"/cpu_freq_cpu2\",25,1,false],[\"CPU 3 Frequency\",\"/cpu_freq_cpu3\",25,1,false],[\"CPU 4 Frequency\",\"/cpu_freq_cpu4\",25,1,false],[\"CPU 5 Frequency\",\"/cpu_freq_cpu5\",25,1,false],[\"CPU 6 Frequency\",\"/cpu_freq_cpu6\",25,1,false],[\"CPU 7 Frequency\",\"/cpu_freq_cpu7\",25,1,false],[\"CPU 8 Frequency\",\"/cpu_freq_cpu8\",25,1,false],[\"CPU 0 Scheduling\",\"/sched_cpu0\",30,1,false],[\"CPU 1 Scheduling\",\"/sched_cpu1\",30,1,false],[\"CPU 2 Scheduling\",\"/sched_cpu2\",30,1,false],[\"CPU 3 Scheduling\",\"/sched_cpu3\",30,1,false],[\"CPU 4 Scheduling\",\"/sched_cpu4\",30,1,false],[\"CPU 5 Scheduling\",\"/sched_cpu5\",30,1,false],[\"CPU 6 Scheduling\",\"/sched_cpu6\",30,1,false],[\"CPU 7 Scheduling\",\"/sched_cpu7\",30,1,false],[\"CPU 8 Scheduling\",\"/sched_cpu8\",30,1,false]]}",
- "pngHash": "5b0b414e",
- "note": "sequence is the hard expectation; pngHash is advisory until T1.14 (residual rasterization flake) is closed"
+ "pngHash": "36920442",
+ "note": "sequence and pngHash are both hard expectations (byte determinism proven 20/20 on GPU and SwiftShader, T1.14 closed)"
 }
